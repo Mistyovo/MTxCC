@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"flag"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -26,6 +27,20 @@ func run() error {
 	addr := flag.String("addr", "", "HTTP 监听地址（覆盖 MTX_LISTEN_ADDR）")
 	flag.Parse()
 
+	if len(os.Args) > 1 && os.Args[1] == "version" {
+		fmt.Println("MTxCC v0.3.0-m2")
+		if cfg, err := config.Load(); err == nil {
+			if st, err := server.New(server.Options{
+				DatabaseURL: cfg.DatabaseURL, MasterKey: cfg.MasterKey, DataDir: cfg.DataDir,
+			}); err == nil {
+				n, _ := st.SchemaVersion(context.Background())
+				fmt.Printf("schema: v%d\n", n)
+				st.Close()
+			}
+		}
+		return nil
+	}
+
 	cfg, err := config.Load()
 	if err != nil {
 		return err
@@ -38,13 +53,13 @@ func run() error {
 		DatabaseURL:  cfg.DatabaseURL,
 		MasterKey:    cfg.MasterKey,
 		DataDir:      cfg.DataDir,
-		SandboxImage: os.Getenv("MTX_SANDBOX_IMAGE"), // 生产：per-task 容器沙箱（C2b）
+		SandboxImage: os.Getenv("MTX_SANDBOX_IMAGE"),
 	})
 	if err != nil {
 		return err
 	}
 	defer srv.Close()
-	srv.RecoverRunning() // 崩溃恢复（I4）：重启续跑未竟任务
+	srv.RecoverRunning()
 
 	httpSrv := &http.Server{
 		Addr:              cfg.ListenAddr,
@@ -57,7 +72,7 @@ func run() error {
 
 	errCh := make(chan error, 1)
 	go func() { errCh <- httpSrv.ListenAndServe() }()
-	log.Printf("MTxCC 监听 %s（API + 内嵌前端）", cfg.ListenAddr)
+	log.Printf("MTxCC v0.3.0 监听 %s（API + 内嵌前端）", cfg.ListenAddr)
 
 	select {
 	case err := <-errCh:
@@ -65,7 +80,6 @@ func run() error {
 			return err
 		}
 	case <-ctx.Done():
-		// 优雅退出：SIGTERM → 5s 排空窗口。
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		return httpSrv.Shutdown(shutdownCtx)
