@@ -1,0 +1,27 @@
+name: ci
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26"
+      - name: Build
+        run: go build ./...
+      - name: Vet + line limit (800)
+        run: |
+          go vet ./...
+          viol=$(find . -name '*.go' -not -path './web/*' | xargs wc -l | awk '$1 > 800 && $2 != "total" {print $2" ("$1" 行)"}')
+          if [ -n "$viol" ]; then echo "超过 800 行红线："; echo "$viol"; exit 1; fi
+      - name: Unit tests
+        run: go test ./...
+      - name: Integration tests (docker)
+        run: go test ./... -tags=docker
+        continue-on-error: false
