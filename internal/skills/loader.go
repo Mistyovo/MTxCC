@@ -19,36 +19,43 @@ type SkillMeta struct {
 	RequiredTools []string
 }
 
-// Catalog 扫描目录（.md）解析 frontmatter，按名称排序。
+// Catalog 递归扫描目录树（.md）解析 frontmatter，按名称排序。
 func Catalog(dir string) []SkillMeta {
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		return nil
-	}
 	var out []SkillMeta
-	for _, e := range entries {
-		if e.IsDir() || !strings.HasSuffix(e.Name(), ".md") {
-			continue
+	_ = filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
+		if err != nil || d.IsDir() || !strings.HasSuffix(d.Name(), ".md") {
+			return nil
 		}
-		b, err := os.ReadFile(filepath.Join(dir, e.Name()))
+		b, err := os.ReadFile(path)
 		if err != nil {
-			continue
+			return nil
 		}
 		m := parseFrontmatter(string(b))
 		if m.Name == "" {
-			m.Name = strings.TrimSuffix(e.Name(), ".md")
+			m.Name = strings.TrimSuffix(d.Name(), ".md")
 		}
 		out = append(out, m)
-	}
+		return nil
+	})
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
 	return out
 }
 
-// Load 读技能全文（含正文，去 frontmatter 块）。
+// Load 读技能全文（递归定位，含正文，去 frontmatter 块）。
 func Load(dir, name string) (string, error) {
-	b, err := os.ReadFile(filepath.Join(dir, name+".md"))
-	if err != nil {
+	var found string
+	_ = filepath.WalkDir(dir, func(p string, d os.DirEntry, err error) error {
+		if err == nil && !d.IsDir() && d.Name() == name+".md" {
+			found = p
+		}
+		return nil
+	})
+	if found == "" {
 		return "", fmt.Errorf("技能 %q 不存在（用目录里的名称）", name)
+	}
+	b, err := os.ReadFile(found)
+	if err != nil {
+		return "", err
 	}
 	s := string(b)
 	if strings.HasPrefix(s, "---\n") {
