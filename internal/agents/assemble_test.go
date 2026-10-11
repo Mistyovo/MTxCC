@@ -56,7 +56,7 @@ func TestAssembleWorkerToolSurface(t *testing.T) {
 	for _, tl := range opts.Tools.List() {
 		names[tl.Name()] = true
 	}
-	for _, want := range []string{"bash", "read", "write", "list", "record_fact", "insert_assets", "report_finding", "prove_goal"} {
+	for _, want := range []string{"bash", "read", "write", "list", "record_fact", "insert_assets", "report_finding", "prove_goal", "expert_http", "expert_write_poc"} {
 		if !names[want] {
 			t.Errorf("worker 缺工具 %s（现有 %v）", want, names)
 		}

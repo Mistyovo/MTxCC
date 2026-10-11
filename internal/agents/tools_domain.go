@@ -17,6 +17,7 @@ type ExecContext struct {
 	ExpID    int64
 	IntentID int64
 	Role     string
+	Depth    int // 委托深度（worker=0，expert=1；>0 不再给 expert 工具）
 }
 
 // DomainTools 生成 worker 写回六件套 + 查询工具（spec §6.2）。

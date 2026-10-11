@@ -21,6 +21,7 @@ type CommonDeps struct {
 	MaxTokens    int // 单回复输出上限（profile.max_tokens 透传）
 	CtxWindowK   int // 上下文窗口（千 token，压缩阈值）
 	RunSeconds   int
+	Workroot     string // worker/expert 文件工具根目录
 }
 
 // AssembleWorker 装配执行者（意图进 system 不可压缩；工具面=领域写回+bash+文件+traffic；
@@ -41,6 +42,9 @@ func AssembleWorker(deps CommonDeps, ec ExecContext, intent graph.Node) harness.
 	reg.Register(tools.NewList(root))
 	for _, t := range deps.TrafficTools {
 		reg.Register(t)
+	}
+	for _, t := range ExpertTools(deps, ec) {
+		reg.Register(t) // 专家委托（深度 1，Review Focus 1）
 	}
 
 	system, _ := renderWorkerPrompt(WorkerPromptConst, WorkerPromptConst, map[string]any{
