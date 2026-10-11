@@ -147,7 +147,7 @@ func (g *GraphStore) RecordFact(ctx context.Context, expID, fromIntent int64, ti
 	var id int64
 	if err := g.s.QueryRow(ctx, `INSERT INTO exploration_nodes
 		(exploration_id, kind, state, title, body, created_at, updated_at)
-		VALUES ($1,'fact','active',$2,jsonb_build_object('confidence',$3,'body',$4::jsonb),now(),now())
+		VALUES ($1,'fact','active',$2::text,jsonb_build_object('confidence',$3::text,'body',$4::jsonb),now(),now())
 		RETURNING id`,
 		expID, title, confidence, string(body)).Scan(&id); err != nil {
 		return 0, err
