@@ -386,9 +386,9 @@ mtx/
 
 | 期 | 周期 | 范围 | 验收 |
 |---|---|---|---|
-| M0 内核 | 6 周 | harness/llm/graph/engine + Bash·tmux + 容器沙箱 + RoE 双层 + guard + 单 admin UI 骨架（任务/活动流） | 本地靶场（DVWA 3 漏洞类）自主完成全流程；RoE 绕过用例全挡；全流量留痕可检索 |
+| M0 内核 | 6 周 | harness/llm/graph/engine + Bash·tmux + 容器沙箱 + RoE 双层 + guard + **开箱即用包（安装脚本/首启向导/LLM 配置 UI/预构建镜像/demo 靶场 profile）** | 本地靶场（DVWA 3 漏洞类）自主完成全流程；RoE 绕过用例全挡；全流量留痕可检索；**小白验收：非技术用户从 `curl …install.sh` 到看到第一份任务活动流 ≤15 分钟** |
 | M1 实战 | 4 周 | 专家委托 + 技能库 20 个 + oracle/verifier + reporter + MCP + 流量绑定 + 凭据 vault | 红日靶场单链路打穿；发现 100% 过 oracle；高危 100% verifier 复核 |
-| M2 产品 | 4 周 | 多用户/RBAC/审计链/安装器/升级/文档/报告模板 | 干净 Ubuntu 上一键部署，2h 内出首份合规报告；渗透测试员评审报告可用 |
+| M2 产品 | 4 周 | 多用户/RBAC/审计链/升级机制/报告模板/完整文档站 | 干净 Ubuntu 上一键部署，2h 内出首份合规报告；渗透测试员评审报告可用 |
 | M3 成绩 | 持续 | XBOW/黑客松 adapter + 回放基建 + 烧钱调优 | 公开基准成绩（目标：XBOW ≥ Decepticon 102/104 水平） |
 
 每期结束做一次安全自评（用 agentic-radar 式思路对本系统自身做 agent 安全回归）。
