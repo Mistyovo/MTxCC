@@ -294,10 +294,18 @@ func (t *graphOverviewTool) Call(ctx context.Context, _ json.RawMessage) (string
 	if err != nil {
 		return "", err
 	}
-	out, _ := json.Marshal(map[string]any{
+	// struct 键不可 JSON 化：转 "class@target" 字符串键。
+	dead := map[string]int{}
+	for k, n := range ov.DeadVectors {
+		dead[k.VectorClass+"@"+k.TargetKey] = n
+	}
+	out, err := json.Marshal(map[string]any{
 		"goals": ov.Goals, "intents": ov.Intents,
-		"recent_facts": ov.RecentFacts, "dead_vectors": ov.DeadVectors,
+		"recent_facts": ov.RecentFacts, "dead_vectors": dead,
 	})
+	if err != nil {
+		return "", err
+	}
 	return string(out), nil
 }
 
