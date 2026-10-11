@@ -37,18 +37,12 @@ type PermissionChecker interface {
 	PostToolUse(ctx context.Context, tool string, input, result string)
 }
 
-// Compactor 是历史压缩器（Task 8 实现；nil 表示不压缩）。
-type Compactor interface {
-	Pre(msgs []llm.Message) ([]llm.Message, error)
-	MarkPromptTooLong()
-}
-
 // Options 配置一次会话循环。
 type Options struct {
 	Provider       llm.Provider
 	Tools          *tools.Registry
 	Transcript     TranscriptStore
-	Compactor      Compactor
+	Compactor      *Compactor // nil 表示不压缩
 	Perms          PermissionChecker
 	Model          string        // 请求所用模型名（透传 Provider）
 	MaxTurns       int           // 0 = 默认 40
