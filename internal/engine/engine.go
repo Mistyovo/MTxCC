@@ -184,6 +184,21 @@ func (e *Engine) Run(ctx context.Context, taskID int64) error {
 	}()
 
 	wg.Wait()
+
+	// 终态兜底（线上 bug：ctx 超时直接返回，任务永留 running/created）：
+	// Run 退出前，若任务仍非终态，按超时与否落 timeout/done。
+	var curStatus string
+	_ = e.Deps.Store.QueryRow(context.WithoutCancel(ctx),
+		`SELECT status FROM tasks WHERE id=$1`, taskID).Scan(&curStatus)
+	switch curStatus {
+	case "", "created", "queued", "running", "paused":
+		final := "done"
+		if ctx.Err() != nil {
+			final = "timeout"
+		}
+		finish(final)
+	}
+
 	select {
 	case <-e.doneCh:
 	default:
