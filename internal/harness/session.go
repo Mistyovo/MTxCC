@@ -54,6 +54,9 @@ type Options struct {
 	// 换独立轮数预算（10 轮）让 agent 把已识别内容写回后再结束；终态仍记 MaxTurns/Timeout。
 	Settlement          bool
 	SettlementKeepTools []string // 收尾期间保留的非只读工具（写回类：record_fact 等）
+
+	// OnToolCall 工具级事件回调（引擎接 activity 落库）；可为 nil。
+	OnToolCall func(tool, input, result string, isErr bool)
 }
 
 // settlementPrompt 是收尾阶段注入的固定追加段（代码常量，DB 不可编辑）。

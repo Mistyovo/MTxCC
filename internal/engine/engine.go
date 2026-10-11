@@ -31,6 +31,7 @@ type Deps struct {
 	Model      string
 	Workers    int
 	Debounce   time.Duration // planner 唤醒合并窗口（默认 800ms；测试调小）
+	ActivityFn func(intentID int64, role, kind, payload string) // 事件落库回调，可 nil
 }
 
 // Engine 是任务编排引擎。
@@ -250,6 +251,14 @@ func (e *Engine) runIntent(ctx context.Context, intent graph.Node) {
 	opts.Provider = e.Deps.Pool
 	opts.Transcript = e.Deps.Transcript
 	opts.Model = e.Deps.Model
+	if e.Deps.ActivityFn != nil {
+		af := e.Deps.ActivityFn
+		intentID := intent.ID
+		opts.OnToolCall = func(tool, input, result string, isErr bool) {
+			af(intentID, "worker", "tool_use",
+				fmt.Sprintf(`{"tool":%q,"input":%s,"result":%.400q,"is_error":%v}`, tool, input, result, isErr))
+		}
+	}
 
 	retryDelay := e.RetryDelay
 	if retryDelay <= 0 {

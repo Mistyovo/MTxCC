@@ -202,6 +202,9 @@ func (s *Session) execOneTool(ctx context.Context, u llm.Block) llm.Block {
 	if s.opts.Perms != nil {
 		s.opts.Perms.PostToolUse(ctx, toolName, string(input), out)
 	}
+	if s.opts.OnToolCall != nil {
+		s.opts.OnToolCall(toolName, string(input), out, err != nil)
+	}
 	if err != nil {
 		return mk(err.Error(), true)
 	}
