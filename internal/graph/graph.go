@@ -320,3 +320,26 @@ func (g *GraphStore) DeadVectors(ctx context.Context, expID int64) map[VectorKey
 }
 
 var _ = time.Now
+
+// BindTraffic 把流量交换 ID 绑定为 finding 证据（spec §8.3 traffic_refs）。
+func (g *GraphStore) BindTraffic(ctx context.Context, taskID, findingID int64, exchangeIDs []string) error {
+	if len(exchangeIDs) == 0 {
+		return nil
+	}
+	var raw []byte
+	if err := g.s.QueryRow(ctx, `SELECT evidence::text FROM findings WHERE id=$1 AND task_id=$2`,
+		findingID, taskID).Scan(&raw); err != nil {
+		return err
+	}
+	var evs []map[string]any
+	_ = json.Unmarshal(raw, &evs)
+	if evs == nil {
+		evs = []map[string]any{}
+	}
+	for _, id := range exchangeIDs {
+		evs = append(evs, map[string]any{"kind": "traffic", "ref": id, "excerpt": "见流量回放"})
+	}
+	b, _ := json.Marshal(evs)
+	_, err := g.s.Exec(ctx, `UPDATE findings SET evidence=$2::jsonb WHERE id=$1`, findingID, string(b))
+	return err
+}
