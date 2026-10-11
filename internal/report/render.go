@@ -39,7 +39,7 @@ var sevOrder = map[string]int{"critical": 0, "high": 1, "medium": 2, "low": 3, "
 func RenderMarkdown(d Data) string {
 	var sb strings.Builder
 	fmt.Fprintf(&sb, "# 渗透测试报告\n\n")
-	fmt.Fprintf(&sb, "- 任务：#%d\n- 目标：`%s`\n- 状态：%s\n\n", d.TaskID, d.TargetText, d.Status)
+	fmt.Fprintf(&sb, "- 任务 #%d\n- 目标：`%s`\n- 状态：%s\n\n", d.TaskID, d.TargetText, d.Status)
 
 	// 摘要。
 	counts := map[string]int{}
