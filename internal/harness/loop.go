@@ -105,6 +105,21 @@ func (s *Session) Query(ctx context.Context, system, user string) (QueryResult, 
 			res.Reason = ReasonModelError
 			return res, fmt.Errorf("流中断: %w", streamErr)
 		}
+		// 文本协议工具调用（弱模型 fallback）：文本里嵌 tool_use 块 → 注入标准
+		// tool_use blocks（调研 T3MP3ST 文本协议设计）。在落盘前规范化，
+		// 保证历史/轮次计数单一路径。
+		if countToolUse(assistant) == 0 {
+			if calls := ParseTextToolCalls(textOf(assistant)); len(calls) > 0 {
+				for i, c := range calls {
+					assistant.Blocks = append(assistant.Blocks, llm.Block{
+						Type:      llm.BlockToolUse,
+						ID:        textToolID(i),
+						Name:      c.Name,
+						InputJSON: c.InputJSON,
+					})
+				}
+			}
+		}
 		s.append(assistant)
 		res.Turns++
 
@@ -113,26 +128,6 @@ func (s *Session) Query(ctx context.Context, system, user string) (QueryResult, 
 			res.Reason = ReasonTimeout
 			res.FinalText = textOf(assistant)
 			return res, nil
-		}
-
-		// 文本协议工具调用（弱模型 fallback）：assistant 文本里嵌 tool_use 块
-		// → 转为标准 tool_use blocks 继续执行（调研 T3MP3ST 文本协议设计）。
-		if countToolUse(assistant) == 0 {
-			if calls := ParseTextToolCalls(textOf(assistant)); len(calls) > 0 {
-				for i, c := range calls {
-					assistant.Blocks = append(assistant.Blocks, llm.Block{
-						Type: llm.BlockToolUse,
-						ID:   textToolID(i),
-						Name: c.Name,
-						InputJSON: c.InputJSON,
-					})
-				}
-				s.append(assistant)
-				res.Turns++
-				results := s.execTools(ctx, assistant)
-				s.append(llm.Message{Role: llm.RoleUser, Blocks: results})
-				continue
-			}
 		}
 
 		// 无工具调用：本轮即最终回复。
