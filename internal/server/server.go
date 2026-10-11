@@ -282,3 +282,8 @@ func (s *Server) decryptKey(b []byte) string {
 	}
 	return string(plain)
 }
+
+// SchemaVersion 暴露 schema 版本（mtx version 用）。
+func (s *Server) SchemaVersion(ctx context.Context) (int, error) {
+	return s.store.SchemaVersion(ctx)
+}
