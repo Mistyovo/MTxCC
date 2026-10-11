@@ -84,5 +84,44 @@ func (s *Server) handleTestProfile(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// decryptKey M0：api_key_enc 暂以明文存储兼容（AES-GCM 加密在 M2 凭据模块统一接入）。
-func (s *Server) decryptKey(b []byte) string { return string(b) }
+// handleCreateProfile 创建 profile（I1；api_key AES-GCM 落库 I2）。
+func (s *Server) handleCreateProfile(w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		Name      string `json:"name"`
+		Protocol  string `json:"protocol"`
+		BaseURL   string `json:"base_url"`
+		Model     string `json:"model"`
+		APIKey    string `json:"api_key"`
+		MaxTokens int    `json:"max_tokens"`
+	}
+	if err := readJSON(r, &in); err != nil {
+		errJSON(w, http.StatusBadRequest, "bad request: "+err.Error())
+		return
+	}
+	switch in.Protocol {
+	case "anthropic", "openai", "openai_responses":
+	default:
+		errJSON(w, http.StatusBadRequest, "protocol ∈ anthropic|openai|openai_responses")
+		return
+	}
+	if in.Name == "" || in.Model == "" {
+		errJSON(w, http.StatusBadRequest, "name 与 model 必填")
+		return
+	}
+	if in.MaxTokens <= 0 {
+		in.MaxTokens = 8192
+	}
+	var id int64
+	err := s.store.QueryRow(sqlCtx(), `INSERT INTO llm_profiles
+		(name, protocol, base_url, api_key_enc, model, max_tokens, enabled)
+		VALUES ($1,$2,$3,$4,$5,$6,true)
+		ON CONFLICT (name) DO UPDATE SET protocol=EXCLUDED.protocol, base_url=EXCLUDED.base_url,
+			api_key_enc=EXCLUDED.api_key_enc, model=EXCLUDED.model, max_tokens=EXCLUDED.max_tokens, enabled=true
+		RETURNING id`,
+		in.Name, in.Protocol, in.BaseURL, s.encryptKey(in.APIKey), in.Model, in.MaxTokens).Scan(&id)
+	if err != nil {
+		errJSON(w, 500, err.Error())
+		return
+	}
+	writeJSON(w, 200, map[string]any{"id": id})
+}

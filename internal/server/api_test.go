@@ -104,7 +104,10 @@ func startAPI(t *testing.T, llmURL string) (*httptest.Server, *store.Store, stri
 	_, _ = s.Exec(ctx, `INSERT INTO llm_profiles (name, protocol, base_url, api_key_enc, model, enabled)
 		VALUES ('fake', 'openai', $1, NULL, 'fake-model', true)`, llmURL)
 
-	srv := New(Options{Store: s, MasterKey: "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=", DataDir: t.TempDir(), BashLocal: true})
+	srv, err := New(Options{Store: s, MasterKey: "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=", DataDir: t.TempDir(), BashLocal: true})
+	if err != nil {
+		t.Fatal(err)
+	}
 	ts := httptest.NewServer(srv.Router())
 	t.Cleanup(ts.Close)
 	return ts, s, ""

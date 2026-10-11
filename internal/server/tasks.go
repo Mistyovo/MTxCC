@@ -1,11 +1,19 @@
 package server
 
 import (
+	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
 	"time"
+
+	"github.com/docker/docker/client"
+
+	"mtx/internal/roe"
+	"mtx/internal/sandbox"
 
 	"mtx/internal/agents"
 	"mtx/internal/engine"
@@ -16,7 +24,7 @@ import (
 
 // buildPool 从已启用 profile 构建 provider 池（顺序即故障转移链）。
 func (s *Server) buildPool() (llm.Provider, []llm.Profile, error) {
-	rows, err := s.store.Query(sqlCtx(), `SELECT name, protocol, base_url, model
+	rows, err := s.store.Query(sqlCtx(), `SELECT name, protocol, base_url, model, max_tokens, api_key_enc
 		FROM llm_profiles WHERE enabled ORDER BY id`)
 	if err != nil {
 		return nil, nil, err
@@ -25,9 +33,11 @@ func (s *Server) buildPool() (llm.Provider, []llm.Profile, error) {
 	var profiles []llm.Profile
 	for rows.Next() {
 		var p llm.Profile
-		if err := rows.Scan(&p.Name, &p.Protocol, &p.BaseURL, &p.Model); err != nil {
+		var keyEnc []byte
+		if err := rows.Scan(&p.Name, &p.Protocol, &p.BaseURL, &p.Model, &p.MaxTokens, &keyEnc); err != nil {
 			return nil, nil, err
 		}
+		p.APIKey = s.decryptKey(keyEnc)
 		p.Enabled = true
 		profiles = append(profiles, p)
 	}
@@ -63,8 +73,9 @@ func targetHost(t string) string {
 
 func (s *Server) handleCreateTask(w http.ResponseWriter, r *http.Request) {
 	var in struct {
-		TargetText     string `json:"target_text"`
-		TimeoutSeconds int    `json:"timeout_seconds"`
+		TargetText     string          `json:"target_text"`
+		TimeoutSeconds int             `json:"timeout_seconds"`
+		RoE            json.RawMessage `json:"roe"`
 	}
 	if err := readJSON(r, &in); err != nil || strings.TrimSpace(in.TargetText) == "" {
 		errJSON(w, http.StatusBadRequest, "target_text 必填")
@@ -108,6 +119,18 @@ func (s *Server) handleCreateTask(w http.ResponseWriter, r *http.Request) {
 		errJSON(w, 500, err.Error())
 		return
 	}
+	// 任务级 RoE 落库（C2a：guard.loadRoE 读取）。
+	if len(in.RoE) > 0 {
+		if _, err := roe.ParseRules(in.RoE); err != nil {
+			errJSON(w, http.StatusBadRequest, "RoE JSON 无效："+err.Error())
+			return
+		}
+		if _, err := s.store.Exec(sqlCtx(),
+			`INSERT INTO roe_rules (scope, task_id, data) VALUES ('task', $1, $2::jsonb)`, taskID, string(in.RoE)); err != nil {
+			errJSON(w, 500, err.Error())
+			return
+		}
+	}
 	// 种子意图：首轮直接派一条"全量侦察"意图，planner 随后接管。
 	if _, err := s.graph.AddIntent(sqlCtx(), expID, nil, "对目标 "+targetHost(in.TargetText)+" 做初始侦察（端口/服务/Web 指纹）", 5, nil); err != nil {
 		errJSON(w, 500, err.Error())
@@ -115,20 +138,26 @@ func (s *Server) handleCreateTask(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 起引擎（异步）。
-	go s.launchEngine(taskID, pool)
+	maxTokens := 0
+	if len(profiles) > 0 {
+		maxTokens = profiles[0].MaxTokens
+	}
+	go s.launchEngine(taskID, pool, maxTokens)
 
 	writeJSON(w, 200, map[string]any{"id": taskID, "status": "queued"})
 }
 
 // launchEngine 组装并运行该任务的引擎。
-func (s *Server) launchEngine(taskID int64, pool llm.Provider) {
+func (s *Server) launchEngine(taskID int64, pool llm.Provider, maxTokens int) {
 	dataDir := s.opts.DataDir + "/tasks"
-	var bashExec tools.BashExec = tools.NewLocalExec(dataDir, nil) // BashLocal 模式；沙箱模式 Task 24 接线
+	_ = os.MkdirAll(dataDir, 0o750)
+	var bashExec tools.BashExec = tools.NewLocalExec(dataDir, nil) // BashLocal 开发模式；生产沙箱见 deploy（MTX_SANDBOX）
 	e := engine.NewEngine(engine.Deps{
 		Store: s.store, Graph: s.graph, Pool: pool,
 		Bash:       bashExec,
 		Transcript: harness.NewFileTranscript(s.opts.DataDir + "/transcripts"),
 		Model:      "auto",
+		MaxTokens:  maxTokens,
 		Workers:    2, Debounce: 500 * time.Millisecond,
 		Perms: s.guard.ForTask(taskID),
 		ActivityFn: func(intentID int64, role, kind, payload string) {
@@ -192,6 +221,35 @@ func (s *Server) handleTaskControl(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]bool{"ok": true})
 }
 
+// handleTaskSteer 对在跑意图注入纠偏（I6 API 面；工具面 M1）。
+func (s *Server) handleTaskSteer(w http.ResponseWriter, r *http.Request) {
+	var taskID int64
+	if _, err := fmt.Sscanf(r.PathValue("id"), "%d", &taskID); err != nil {
+		errJSON(w, http.StatusBadRequest, "bad id")
+		return
+	}
+	var in struct {
+		IntentID int64  `json:"intent_id"`
+		Message  string `json:"message"`
+	}
+	if err := readJSON(r, &in); err != nil || in.Message == "" {
+		errJSON(w, http.StatusBadRequest, "message 必填")
+		return
+	}
+	s.mu.Lock()
+	e := s.engines[taskID]
+	s.mu.Unlock()
+	if e == nil {
+		errJSON(w, 404, "任务引擎未在运行")
+		return
+	}
+	if err := e.Steer(r.Context(), in.IntentID, in.Message); err != nil {
+		errJSON(w, 400, err.Error())
+		return
+	}
+	writeJSON(w, 200, map[string]bool{"ok": true})
+}
+
 func (s *Server) handleTaskGraph(w http.ResponseWriter, r *http.Request) {
 	var taskID int64
 	if _, err := fmt.Sscanf(pathParam(r), "%d", &taskID); err != nil {
@@ -227,4 +285,42 @@ func (s *Server) handleTaskGraph(w http.ResponseWriter, r *http.Request) {
 
 func pathParam(r *http.Request) string {
 	return r.PathValue("id")
+}
+
+// ensureSandbox 建任务专属加固容器并尽力注入出口围栏（C2b 生产路径）。
+func (s *Server) ensureSandbox(taskID int64) (*sandbox.Instance, error) {
+	cli, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
+	if err != nil {
+		return nil, err
+	}
+	m := sandbox.NewManager(cli)
+	dir := s.opts.DataDir + "/tasks"
+	inst, err := m.Ensure(context.Background(), sandbox.Spec{
+		Image: s.opts.SandboxImage,
+		Name:  fmt.Sprintf("mtx-task-%d", taskID),
+		WorkdirVol: dir,
+	})
+	if err != nil {
+		return nil, err
+	}
+	// RoE 出口围栏（尽力而为；失败不阻断任务，解析层仍在岗）。
+	if r := s.loadRoE(taskID); r.Mode == "enforce" {
+		_ = sandbox.InjectEgress(context.Background(), m, inst, r)
+	}
+	return inst, nil
+}
+
+// proxyEnv 返回留痕代理注入配置（未启用时 Enabled=false）。
+func (s *Server) proxyEnv() *tools.ProxyEnv {
+	if s.proxy == nil {
+		return &tools.ProxyEnv{Enabled: false}
+	}
+	addr := s.proxy.ListenerAddr()
+	if addr == "" {
+		return &tools.ProxyEnv{Enabled: false}
+	}
+	return &tools.ProxyEnv{
+		Addr: "http://" + strings.Split(addr, ":")[0] + ":8788", Enabled: true,
+		CACertPath: s.opts.DataDir + "/ca/mitm.pem",
+	}
 }

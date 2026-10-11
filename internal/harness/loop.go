@@ -2,6 +2,7 @@ package harness
 
 import (
 	"context"
+	"errors"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -58,18 +59,30 @@ func (s *Session) Query(ctx context.Context, system, user string) (QueryResult, 
 		}
 
 		req := llm.Request{
-			Model:    s.opts.Model,
-			System:   system,
-			Messages: view,
-			Tools:    s.toolSpecs(),
+			Model:     s.opts.Model,
+			MaxTokens: s.opts.MaxTokens,
+			System:    system,
+			Messages:  view,
+			Tools:     s.toolSpecs(),
 		}
 		if s.settleMode {
 			req.System = system + settlementPrompt // 收尾指令追加（代码常量）
 		}
 		ch, err := s.opts.Provider.Stream(ctx, req)
 		if err != nil {
-			res.Reason = ReasonModelError
-			return res, fmt.Errorf("模型调用: %w", err)
+			if isPromptTooLong(err) && s.opts.Compactor != nil {
+				// Reactive：413/prompt too long → 标记压缩后重试一次（审查 I3）。
+				s.opts.Compactor.MarkPromptTooLong()
+				view2, cerr := s.opts.Compactor.Pre(s.history)
+				if cerr == nil {
+					req.Messages = view2
+					ch, err = s.opts.Provider.Stream(ctx, req)
+				}
+			}
+			if err != nil {
+				res.Reason = ReasonModelError
+				return res, fmt.Errorf("模型调用: %w", err)
+			}
 		}
 
 		assistant, stopReason, usage, streamErr := aggregateStream(ch)
@@ -81,6 +94,13 @@ func (s *Session) Query(ctx context.Context, system, user string) (QueryResult, 
 			if ctx.Err() != nil {
 				res.Reason = ReasonTimeout // 墙钟到期导致的断流按超时归类
 				return res, nil
+			}
+			if isPromptTooLong(streamErr) && s.opts.Compactor != nil {
+				s.opts.Compactor.MarkPromptTooLong()
+				view2, cerr := s.opts.Compactor.Pre(s.history)
+				if cerr == nil {
+					_ = view2 // 流中 413：下一轮循环压缩生效（Pre 在轮首调用）
+				}
 			}
 			res.Reason = ReasonModelError
 			return res, fmt.Errorf("流中断: %w", streamErr)
@@ -147,6 +167,7 @@ func (s *Session) execTools(ctx context.Context, assistant llm.Message) []llm.Bl
 	}
 	results := make([]llm.Block, len(uses))
 	sem := make(chan struct{}, s.opts.ToolConcurrency)
+	exclusive := make(chan struct{}, 1) // 非并发工具（如 bash）独占（审查 I11）
 	var wg sync.WaitGroup
 	for i, u := range uses {
 		wg.Add(1)
@@ -154,6 +175,10 @@ func (s *Session) execTools(ctx context.Context, assistant llm.Message) []llm.Bl
 			defer wg.Done()
 			sem <- struct{}{}
 			defer func() { <-sem }()
+			if t, ok := s.opts.Tools.Get(u.Name); ok && !t.Flags().Concurrent {
+				exclusive <- struct{}{}
+				defer func() { <-exclusive }()
+			}
 			results[i] = s.execOneTool(ctx, u)
 		}(i, u)
 	}
@@ -186,11 +211,15 @@ func (s *Session) execOneTool(ctx context.Context, u llm.Block) llm.Block {
 	}
 	toolName = t.Name()
 
-	// 审批门（可选）。
+	// 审批门（可选）。拒绝也走 OnToolCall（activity 需要留痕被拦截的动作）。
 	if s.opts.Perms != nil {
 		replaced, err := s.opts.Perms.PreToolUse(ctx, toolName, input)
 		if err != nil {
-			return mk(fmt.Sprintf("【MTX 平台管控·非目标防御】拒绝执行：%v", err), true)
+			denyMsg := fmt.Sprintf("【MTX 平台管控·非目标防御】拒绝执行：%v", err)
+			if s.opts.OnToolCall != nil {
+				s.opts.OnToolCall(toolName, string(input), denyMsg, true)
+			}
+			return mk(denyMsg, true)
 		}
 		if len(replaced) > 0 {
 			input = replaced
@@ -260,6 +289,22 @@ func aggregateStream(ch <-chan llm.Event) (msg llm.Message, stopReason string, u
 		})
 	}
 	return msg, stopReason, usage, streamErr
+}
+
+// isPromptTooLong 识别 413/prompt too long 形态（跨协议）。
+func isPromptTooLong(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, ErrPromptTooLong) {
+		return true
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "prompt is too long") ||
+		strings.Contains(msg, "prompt too long") ||
+		strings.Contains(msg, "context length exceeded") ||
+		strings.Contains(msg, "413") ||
+		strings.Contains(msg, "maximum context length")
 }
 
 func countToolUse(m llm.Message) int {

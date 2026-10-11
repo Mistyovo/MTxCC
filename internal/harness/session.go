@@ -45,6 +45,7 @@ type Options struct {
 	Compactor      *Compactor // nil 表示不压缩
 	Perms          PermissionChecker
 	Model          string        // 请求所用模型名（透传 Provider）
+	MaxTokens      int           // 单回复输出上限（0 = 不限制发；providers 兜底 1，务必设置）
 	MaxTurns       int           // 0 = 默认 40
 	MaxDuration    time.Duration // 0 = 不限
 	ToolConcurrency int          // 0 = 默认 10

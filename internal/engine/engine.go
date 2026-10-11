@@ -31,6 +31,7 @@ type Deps struct {
 	Model      string
 	Workers    int
 	Debounce   time.Duration // planner 唤醒合并窗口（默认 800ms；测试调小）
+	MaxTokens  int           // profile.max_tokens 透传（C3）
 	ActivityFn func(intentID int64, role, kind, payload string) // 事件落库回调，可 nil
 }
 
@@ -246,6 +247,7 @@ func (e *Engine) runIntent(ctx context.Context, intent graph.Node) {
 		Transcript: e.Deps.Transcript,
 		Model:      e.Deps.Model,
 		MaxTurns:   e.MaxTurns,
+		MaxTokens:  e.Deps.MaxTokens,
 	}
 	opts := agents.AssembleWorker(deps, ec, intent)
 	opts.Provider = e.Deps.Pool
@@ -275,7 +277,8 @@ func (e *Engine) runIntent(ctx context.Context, intent graph.Node) {
 		if attempt < 2 { // model_error 退避重试 ≤2 次
 			select {
 			case <-wctx.Done():
-			_attemptDone(ctx)
+				// 被取消（Kill/超时）：同样走 finalize，防意图永卡 running（审查 I5）。
+				e.finalizeIntent(ctx, intent, harness.QueryResult{Reason: harness.ReasonAborted}, nil)
 				return
 			case <-time.After(retryDelay):
 			}
@@ -378,6 +381,7 @@ func (e *Engine) planOnce(ctx context.Context, finish func(string), trigger stri
 		Graph: e.Deps.Graph, Transcript: e.Deps.Transcript, Model: e.Deps.Model,
 		MaxTurns: 12,
 	}
+	deps.MaxTurns = 12
 	opts := agents.AssemblePlanner(deps, ec)
 	opts.Provider = e.Deps.Pool
 	opts.Transcript = e.Deps.Transcript
@@ -407,4 +411,3 @@ func workerUserMsg(intent graph.Node) string {
 	return fmt.Sprintf("开始执行意图：%s", intent.Title)
 }
 
-func _attemptDone(ctx context.Context) { _ = ctx.Err() }

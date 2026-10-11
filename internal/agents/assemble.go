@@ -18,6 +18,8 @@ type CommonDeps struct {
 	Transcript   harness.TranscriptStore
 	Model        string
 	MaxTurns     int
+	MaxTokens    int // 单回复输出上限（profile.max_tokens 透传）
+	CtxWindowK   int // 上下文窗口（千 token，压缩阈值）
 	RunSeconds   int
 }
 
@@ -54,11 +56,17 @@ func AssembleWorker(deps CommonDeps, ec ExecContext, intent graph.Node) harness.
 		maxTurns = 40
 	}
 
+	maxTokens := deps.MaxTokens
+	if maxTokens <= 0 {
+		maxTokens = 8192
+	}
 	return harness.Options{
 		Tools:               reg,
 		Perms:               deps.Perms,
 		System:              system,
 		MaxTurns:            maxTurns,
+		MaxTokens:           maxTokens,
+		Compactor:           harness.NewCompactor(nil, deps.CtxWindowK),
 		MaxDuration:         time.Duration(runSeconds) * time.Second,
 		Settlement:          true,
 		SettlementKeepTools: []string{"record_fact", "insert_assets", "report_finding", "prove_goal"},
@@ -76,10 +84,11 @@ func AssemblePlanner(deps CommonDeps, ec ExecContext) harness.Options {
 		maxTurns = 12 // planner 每次唤醒预算小
 	}
 	return harness.Options{
-		Tools:    reg,
-		Perms:    nil, // planner 不执行目标流量（无 bash）
-		System:   PlannerPromptConst,
-		MaxTurns: maxTurns,
+		Tools:     reg,
+		Perms:     nil, // planner 不执行目标流量（无 bash）
+		System:    PlannerPromptConst,
+		MaxTurns:  maxTurns,
+		MaxTokens: deps.MaxTokens,
 	}
 }
 

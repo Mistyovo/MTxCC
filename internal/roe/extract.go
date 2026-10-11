@@ -18,7 +18,16 @@ var (
 
 // targetCmdHints 是"目标位命令"提示：这些命令的裸词参数更可能是目标。
 var targetCmdHints = []string{"nmap", "dig", "nc", "ncat", "netcat", "ssh", "scp", "smbclient",
-	"redis-cli", "mysql", "hydra", "medusa", "sqlmap", "nikto", "gobuster", "ffuf", "masscan", "amass"}
+	"redis-cli", "mysql", "hydra", "medusa", "sqlmap", "nikto", "gobuster", "ffuf", "masscan", "amass",
+	"ping", "ping6", "traceroute", "curl", "wget", "telnet"}
+
+// suspiciousTargetForms 是 fail-closed 的"无法判定目标"形态（审查 C2d）：
+// 输入文件（-iL/-i/-f）、命令替换 $()、反引号、十六进制/八进制 IP。
+var (
+	cmdSubRE     = regexp.MustCompile(`\$\(|\` + "`" + `|\$\{[A-Za-z_]`)
+	inputFileRE  = regexp.MustCompile(`(?:^|\s)-(?:iL|il|I|i|f)\s+\S+`)
+	hexOctIPRE   = regexp.MustCompile(`\b0x[0-9a-fA-F]{6,}\b|\b0[0-7]{9,}\b`)
+)
 
 // ExtractTargets 从命令中提取候选目标（host/IP），去重。
 func ExtractTargets(cmd string) []string {
@@ -50,8 +59,15 @@ func ExtractTargets(cmd string) []string {
 	return out
 }
 
-// looksLikeTargeting 判断命令是否"疑似携带目标但提取失败"（变量间接）→ fail-closed。
+// looksLikeTargeting 判断命令是否"疑似携带目标但无法判定"→ fail-closed（审查 C2d 加固）。
+// 命中任一：目标位命令出现 / 命令替换 / 输入文件 / 十六进制 IP / URL / user@host。
 func looksLikeTargeting(cmd string) bool {
+	if cmdSubRE.MatchString(cmd) || inputFileRE.MatchString(cmd) || hexOctIPRE.MatchString(cmd) {
+		return true
+	}
+	if urlRE.MatchString(cmd) || strings.Contains(cmd, "@") {
+		return true
+	}
 	if !varRE.MatchString(cmd) {
 		return false
 	}
@@ -63,7 +79,7 @@ func looksLikeTargeting(cmd string) bool {
 			}
 		}
 	}
-	return urlRE.MatchString(cmd) || strings.Contains(cmd, "@")
+	return false
 }
 
 func looksDomain(s string) bool { return domainRE.MatchString(s) || strings.Contains(s, ".") }

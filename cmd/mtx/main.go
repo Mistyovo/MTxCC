@@ -7,6 +7,7 @@ import (
 	"flag"
 	"log"
 	"net/http"
+	"os"
 	"os/signal"
 	"syscall"
 	"time"
@@ -33,9 +34,21 @@ func run() error {
 		cfg.ListenAddr = *addr
 	}
 
-	srv := &http.Server{
+	srv, err := server.New(server.Options{
+		DatabaseURL:  cfg.DatabaseURL,
+		MasterKey:    cfg.MasterKey,
+		DataDir:      cfg.DataDir,
+		SandboxImage: os.Getenv("MTX_SANDBOX_IMAGE"), // 生产：per-task 容器沙箱（C2b）
+	})
+	if err != nil {
+		return err
+	}
+	defer srv.Close()
+	srv.RecoverRunning() // 崩溃恢复（I4）：重启续跑未竟任务
+
+	httpSrv := &http.Server{
 		Addr:              cfg.ListenAddr,
-		Handler:           server.NewRouter(),
+		Handler:           srv.Router(),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 
@@ -43,8 +56,8 @@ func run() error {
 	defer stop()
 
 	errCh := make(chan error, 1)
-	go func() { errCh <- srv.ListenAndServe() }()
-	log.Printf("MTxCC 监听 %s", cfg.ListenAddr)
+	go func() { errCh <- httpSrv.ListenAndServe() }()
+	log.Printf("MTxCC 监听 %s（API + 内嵌前端）", cfg.ListenAddr)
 
 	select {
 	case err := <-errCh:
@@ -55,7 +68,7 @@ func run() error {
 		// 优雅退出：SIGTERM → 5s 排空窗口。
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		return srv.Shutdown(shutdownCtx)
+		return httpSrv.Shutdown(shutdownCtx)
 	}
 	return nil
 }
