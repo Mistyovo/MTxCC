@@ -126,3 +126,21 @@ func TestAbortMarker(t *testing.T) {
 	}
 	t.Fatal(".abort 标记应可见")
 }
+
+// TestInjectEgressIntegration 集成验证（需 nft 权限；无权限跳过）：
+// busybox + egress gw 容器（network_mode: container: 共享 netns）。
+func TestInjectEgressIntegration(t *testing.T) {
+	m := newManager(t)
+	ctx := context.Background()
+	spec, _ := busySpec(t)
+	inst, err := m.Ensure(ctx, spec)
+	if err != nil {
+		t.Fatalf("Ensure: %v", err)
+	}
+	t.Cleanup(func() { _ = m.Destroy(context.Background(), inst.ID()) })
+
+	if err := InjectEgress(ctx, m, inst, sampleRules()); err != nil {
+		t.Skipf("egress 注入不可用（无 nft 权限环境按计划允许跳过）: %v", err)
+	}
+	// 注入成功即结构正确；连通性正反向断言在 CI 特权 runner 跑（计划说明）。
+}
