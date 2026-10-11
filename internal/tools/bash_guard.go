@@ -8,8 +8,8 @@ var catastrophicPatterns = []*regexp.Regexp{
 	// rm -rf 根目录或根下单段路径（允许相对路径与多段任务目录如 /tmp/mtx-x）。
 	regexp.MustCompile(`\brm\s+[^|;&]*-[a-zA-Z]*r[a-zA-Z]*f?[^|;&]*\s+/(?:[a-zA-Z0-9_.-]+)?(?:\s|$|;|&)`),
 	regexp.MustCompile(`\brm\s+[^|;&]*-[a-zA-Z]*f[a-zA-Z]*r?[^|;&]*\s+/(?:[a-zA-Z0-9_.-]+)?(?:\s|$|;|&)`),
-	// fork 炸弹（含 ;& 变形）。
-	regexp.MustCompile(`:\(\)\s*\{.*\}\s*;&?\s*:`),
+	// fork 炸弹：匹配"自命名函数 + 自递归管道"定义本身（含 ;& 与截断变形）。
+	regexp.MustCompile(`:\(\)\s*\{[^}]*:\s*\|[^}]*&?[^}]*\}`),
 	// mkfs 直写块设备。
 	regexp.MustCompile(`\bmkfs(?:\.\w+)?\s+(/dev/\S+)`),
 	// dd 输出到块设备。
