@@ -108,8 +108,14 @@ func setupEngine(t *testing.T, prov llm.Provider) (*Engine, *graph.GraphStore, *
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = pg.Terminate(ctx) })
-	dsn, _ := pg.ConnectionString(ctx, "sslmode=disable")
-	s, _ := store.Open(ctx, dsn)
+	dsn, err2 := pg.ConnectionString(ctx, "sslmode=disable")
+	if err2 != nil {
+		t.Fatalf("DSN: %v", err2)
+	}
+	s, err3 := store.Open(ctx, dsn)
+	if err3 != nil {
+		t.Fatalf("store.Open: %v", err3)
+	}
 	t.Cleanup(s.Close)
 	g := graph.NewGraphStore(s)
 
