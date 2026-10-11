@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"mtx/internal/graph"
+	"mtx/internal/skills"
 	"mtx/internal/harness"
 	"mtx/internal/tools"
 )
@@ -22,6 +23,7 @@ type CommonDeps struct {
 	CtxWindowK   int // 上下文窗口（千 token，压缩阈值）
 	RunSeconds   int
 	Workroot     string // worker/expert 文件工具根目录
+	SkillsDir    string // 技能库目录（空则不启用）
 }
 
 // AssembleWorker 装配执行者（意图进 system 不可压缩；工具面=领域写回+bash+文件+traffic；
@@ -46,10 +48,16 @@ func AssembleWorker(deps CommonDeps, ec ExecContext, intent graph.Node) harness.
 	for _, t := range ExpertTools(deps, ec) {
 		reg.Register(t) // 专家委托（深度 1，Review Focus 1）
 	}
+	if deps.SkillsDir != "" {
+		reg.Register(NewLoadSkillTool(deps.SkillsDir))
+	}
 
 	system, _ := renderWorkerPrompt(WorkerPromptConst, WorkerPromptConst, map[string]any{
 		"intent_title": intent.Title,
 	})
+	if deps.SkillsDir != "" {
+		system += skills.CatalogDirPrompt(deps.SkillsDir) // 目录常驻（渐进披露）
+	}
 
 	runSeconds := deps.RunSeconds
 	if runSeconds <= 0 {
