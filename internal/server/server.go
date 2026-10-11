@@ -170,17 +170,39 @@ func (s *Server) Router() http.Handler {
 	inner.HandleFunc("POST /api/auth/login", s.handleLogin)
 
 	inner.HandleFunc("GET /api/tasks", s.handleListTasks)
-	inner.HandleFunc("POST /api/tasks", s.handleCreateTask)
-	inner.HandleFunc("POST /api/tasks/{id}/control", s.handleTaskControl)
-	inner.HandleFunc("POST /api/tasks/{id}/steer", s.handleTaskSteer)
 	inner.HandleFunc("GET /api/tasks/{id}/graph", s.handleTaskGraph)
 	inner.HandleFunc("GET /api/exploration/{id}/activity", s.handleActivity)
 	inner.HandleFunc("GET /api/exploration/{id}/activity/stream", s.handleActivityStream)
 	inner.HandleFunc("GET /api/llm/profiles", s.handleListProfiles)
-	inner.HandleFunc("POST /api/llm/profiles", s.handleCreateProfile)
 	inner.HandleFunc("POST /api/llm/profiles/{id}/test", s.handleTestProfile)
 	inner.HandleFunc("GET /api/intercept/pending", s.handleListPending)
-	inner.HandleFunc("POST /api/intercept/pending/{id}/decide", s.handleDecide)
+	inner.Handle("POST /api/intercept/pending/{id}/decide",
+		s.requireRole("admin", "auditor")(http.HandlerFunc(s.handleDecide)))
+
+	// 用户管理（M2 Task 1）。
+	inner.Handle("POST /api/users",
+		s.requireRole("admin")(http.HandlerFunc(s.handleCreateUser)))
+	inner.Handle("GET /api/users",
+		s.requireRole("admin", "auditor")(http.HandlerFunc(s.handleListUsers)))
+
+	// 审计（M2 Task 2）。
+	inner.Handle("GET /api/audit",
+		s.requireRole("admin", "auditor")(http.HandlerFunc(s.handleListAudit)))
+
+	// 任务写操作限 operator+（Review Focus 1）。
+	inner.Handle("POST /api/tasks",
+		s.requireRole("admin", "operator")(http.HandlerFunc(s.handleCreateTask)))
+	inner.Handle("POST /api/tasks/{id}/control",
+		s.requireRole("admin", "operator")(http.HandlerFunc(s.handleTaskControl)))
+	inner.Handle("POST /api/tasks/{id}/steer",
+		s.requireRole("admin", "operator")(http.HandlerFunc(s.handleTaskSteer)))
+
+	// LLM 配置限 admin。
+	inner.Handle("POST /api/llm/profiles",
+		s.requireRole("admin")(http.HandlerFunc(s.handleCreateProfile)))
+
+	// 报告导出。
+	inner.HandleFunc("GET /api/tasks/{id}/report", s.handleTaskReport)
 
 	// 内嵌前端（/ 与非 /api 静态路径）。
 	inner.Handle("/", webHandler())
