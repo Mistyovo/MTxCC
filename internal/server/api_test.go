@@ -250,3 +250,22 @@ func TestTaskWithoutProfileRejected(t *testing.T) {
 		t.Fatalf("无 profile 应 400 引导: %d %s", resp.StatusCode, body)
 	}
 }
+
+// TestEmbeddedUIServed 验证内嵌前端：/ 返回含 MTxCC 标识的 HTML；未匹配路由回退 index。
+func TestEmbeddedUIServed(t *testing.T) {
+	f := newFakeLLM(nil)
+	ts, _, _ := startAPI(t, f.url())
+
+	resp, body := apiCall(t, "GET", ts.URL+"/", "", nil)
+	if resp.StatusCode != 200 || !strings.Contains(string(body), "MTxCC") {
+		t.Fatalf("首页: %d %.80s", resp.StatusCode, body)
+	}
+	if ct := resp.Header.Get("Content-Type"); !strings.Contains(ct, "text/html") {
+		t.Fatalf("Content-Type = %q", ct)
+	}
+	// SPA 回退：任意路径返回 index 而非 404。
+	resp, body = apiCall(t, "GET", ts.URL+"/tasks", "", nil)
+	if resp.StatusCode != 200 || !strings.Contains(string(body), "MTxCC") {
+		t.Fatalf("SPA 回退失败: %d", resp.StatusCode)
+	}
+}

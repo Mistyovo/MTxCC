@@ -65,16 +65,19 @@ func (s *Server) Router() http.Handler {
 	inner.HandleFunc("GET /api/intercept/pending", s.handleListPending)
 	inner.HandleFunc("POST /api/intercept/pending/{id}/decide", s.handleDecide)
 
+	// 内嵌前端（/ 与非 /api 静态路径）。
+	inner.Handle("/", webHandler())
+
 	return s.authGate(inner)
 }
 
-// exempt 判断是否豁免鉴权。
+// exempt 判断是否豁免鉴权（静态资源与页面路由也豁免，API 数据仍受保护）。
 func exempt(path string) bool {
 	switch path {
 	case "/healthz", "/api/setup/status", "/api/setup", "/api/auth/login":
 		return true
 	}
-	return false
+	return !strings.HasPrefix(path, "/api/") || path == "/api/setup/status"
 }
 
 func (s *Server) authGate(next http.Handler) http.Handler {
