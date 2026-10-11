@@ -12,3 +12,6 @@ data/
 # Node
 node_modules/
 .next/
+
+# worktrees
+.worktrees/
