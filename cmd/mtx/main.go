@@ -3,6 +3,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -13,9 +14,64 @@ import (
 	"syscall"
 	"time"
 
+	"mtx/internal/benchmark"
 	"mtx/internal/config"
 	"mtx/internal/server"
 )
+
+// runBench mtx bench --adapter dvwa --api http://127.0.0.1:8080 --token <jwt> [--model 名称]
+func runBench(args []string) error {
+	fs := flag.NewFlagSet("bench", flag.ExitOnError)
+	adapter := fs.String("adapter", "dvwa", "基准平台：dvwa|xbow|tsec")
+	api := fs.String("api", "http://127.0.0.1:8080", "MTxCC API 地址")
+	token := fs.String("token", os.Getenv("MTX_TOKEN"), "MTxCC JWT")
+	model := fs.String("model", "auto", "模型名（报告标注用）")
+	_ = fs.Parse(args)
+
+	reg := benchmark.NewRegistry()
+	reg.Register("dvwa", &benchmark.DVWAAdapter{})
+	reg.Register("xbow", &benchmark.XBowAdapter{Token: os.Getenv("MTX_XBOW_TOKEN")})
+	reg.Register("tsec", &benchmark.TsecAdapter{Token: os.Getenv("MTX_TSEC_TOKEN")})
+	a, ok := reg.Get(*adapter)
+	if !ok {
+		return fmt.Errorf("未知 adapter %q", *adapter)
+	}
+	if *token == "" {
+		return fmt.Errorf("缺少 --token（或 MTX_TOKEN 环境变量）")
+	}
+
+	r := &benchmark.Runner{Adapter: a, APIBase: *api, Token: *token, Model: *model}
+	fmt.Printf("▶ 基准跑分：adapter=%s api=%s model=%s\n", *adapter, *api, *model)
+	rep, err := r.RunSuite()
+	if err != nil {
+		return err
+	}
+
+	fmt.Printf("\n=== 成绩 ===\n题目 %d · 解出 %d · 成功率 %.1f%% · 平均时延 %ds\n",
+		rep.Total, rep.Solved, rep.SuccessRate(), rep.AvgLatencySec)
+	for _, res := range r.Results {
+		mark := "✗"
+		if res.Solved {
+			mark = "✓"
+		}
+		detail := ""
+		if res.Err != "" {
+			detail = " — " + res.Err
+		} else {
+			detail = fmt.Sprintf("（findings=%d）", res.Findings)
+		}
+		fmt.Printf("  %s %s %s%s\n", mark, res.ID, res.Title, detail)
+	}
+	fmt.Printf("\n=== 与参考系对比 ===\n")
+	for k, c := range rep.CompareWithReference() {
+		fmt.Printf("  %s: %.1f%% vs 我们 %.1f%%（差 %+.1f）\n",
+			k, c["rate"].(float64), c["ours"].(float64), c["diff"].(float64))
+	}
+
+	out, _ := json.MarshalIndent(rep, "", "  ")
+	fmt.Printf("\n%s\n", out)
+	return nil
+}
 
 func main() {
 	if err := run(); err != nil {
@@ -26,6 +82,10 @@ func main() {
 func run() error {
 	addr := flag.String("addr", "", "HTTP 监听地址（覆盖 MTX_LISTEN_ADDR）")
 	flag.Parse()
+
+	if len(os.Args) > 1 && os.Args[1] == "bench" {
+		return runBench(os.Args[2:])
+	}
 
 	if len(os.Args) > 1 && os.Args[1] == "version" {
 		fmt.Println("MTxCC v0.3.0-m2")
