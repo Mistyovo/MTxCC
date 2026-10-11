@@ -1,0 +1,9 @@
+# MTxCC 执行镜像：Kali 工具箱（任务沙箱由此派生）。
+FROM kalilinux/kali-rolling
+RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+    bash tmux curl wget netcat-openbsd nmap sqlmap nikto gobuster dirb ffuf \
+    hydra medusa masscan amass subfinder httpx-toolkit nuclei exploitdb metasploit-framework \
+    python3 python3-pip openssh-client whois dnsutils traceroute tcpdump jq ripgrep \
+    && rm -rf /var/lib/apt/lists/*
+# 长驻：任务容器由 sandbox.Manager 以 sleep infinity 派生。
+CMD ["sleep", "infinity"]

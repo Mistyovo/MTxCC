@@ -1,0 +1,25 @@
+# 阶段 1：前端静态导出
+FROM node:22-alpine AS web
+WORKDIR /src/web
+COPY web/package.json web/package-lock.json ./
+RUN npm ci --registry=https://registry.npmmirror.com --no-audit --no-fund
+COPY web/ .
+RUN npx next build
+
+# 阶段 2：Go 静态编译（前端产物同步进 embed 目录）
+FROM golang:1.26-alpine AS build
+WORKDIR /src
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . .
+COPY --from=web /src/web/out/ /src/internal/server/webdist/
+RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/mtx ./cmd/mtx
+
+# 阶段 3：运行时（含 docker CLI 供沙箱编排；bash/tmux 供宿主 tmux 驱动）
+FROM alpine:3.21
+RUN apk add --no-cache ca-certificates tzdata docker-cli bash tmux curl
+COPY --from=build /out/mtx /usr/local/bin/mtx
+ENV MTX_LISTEN_ADDR=":8080" MTX_DATA_DIR="/data"
+VOLUME ["/data"]
+EXPOSE 8080
+ENTRYPOINT ["mtx"]
