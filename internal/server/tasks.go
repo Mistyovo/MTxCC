@@ -90,10 +90,8 @@ func (s *Server) handleCreateTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// LLM 网关防呆（spec §7.3）：目标不得是模型网关自身。
-	th := strings.ToLower(targetHost(in.TargetText))
 	for _, p := range profiles {
-		pu, err := url.Parse(p.BaseURL)
-		if err == nil && pu.Hostname() != "" && strings.EqualFold(pu.Hostname(), th) {
+		if isGatewayTarget(in.TargetText, p.BaseURL) {
 			errJSON(w, http.StatusBadRequest, "目标疑似 LLM 网关本身，拒绝创建（防误伤）")
 			return
 		}
@@ -324,4 +322,30 @@ func (s *Server) proxyEnv() *tools.ProxyEnv {
 		Addr: "http://" + strings.Split(addr, ":")[0] + ":8788", Enabled: true,
 		CACertPath: s.opts.DataDir + "/ca/mitm.pem",
 	}
+}
+
+// isGatewayTarget 判定目标是否就是 LLM 网关自身（防误伤，按 host:port 完整比较）。
+func isGatewayTarget(target, gateway string) bool {
+	tHost, tPort := splitAuthority(target)
+	gHost, gPort := splitAuthority(gateway)
+	return tHost == gHost && tPort == gPort && tHost != ""
+}
+
+// splitAuthority 提取 host 与端口（协议默认端口补全）。
+func splitAuthority(raw string) (host, port string) {
+	u, err := url.Parse(raw)
+	if err != nil || u.Hostname() == "" {
+		return "", ""
+	}
+	host = u.Hostname()
+	port = u.Port()
+	if port == "" {
+		switch u.Scheme {
+		case "https":
+			port = "443"
+		default:
+			port = "80"
+		}
+	}
+	return strings.ToLower(host), port
 }

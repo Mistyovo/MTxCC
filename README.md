@@ -66,10 +66,24 @@ go test ./internal/tools/tmux/ -tags=tmux
 
 ## 路线
 
-- [x] M0 内核：引擎/沙箱/RoE/审批/留痕/开箱即用
-- [ ] M1 实战：专家委托、技能库、机器 oracle 验证、报告生成
-- [ ] M2 产品：多用户 RBAC、审计链、升级机制
-- [ ] M3 成绩：XBOW / 腾讯黑客松基准
+- [x] M0 内核：引擎/沙箱/RoE/审批/留痕/开箱即用（v0.1.0）
+- [x] M1 实战：专家委托、技能库（23 个）、机器 oracle 验证、报告生成、MCP、凭据 vault（v0.2.0）
+- [x] M2 产品：多用户 RBAC 四角色、审计链、模板、完整文档（v0.3.0）
+- [x] M3 成绩：基准 adapter（XBOW/DVWA/腾讯黑客松）+ mtx bench 一键跑分（v0.4.0）
+
+## 基准跑分
+
+```bash
+# 本地靶场（demo profile 含 DVWA）
+docker compose --profile demo up -d
+mtx bench --adapter dvwa --api http://127.0.0.1:8080 --token <jwt> --model <模型名>
+
+# XBOW 平台
+export MTX_XBOW_TOKEN=<token>
+mtx bench --adapter xbow --token <jwt>
+```
+
+支持任意 OpenAI 兼容端点（含本地 llama.cpp/Ollama）；弱模型自动启用文本工具协议 fallback。
 
 ## 免责声明
 
