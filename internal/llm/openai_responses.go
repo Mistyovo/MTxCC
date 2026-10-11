@@ -19,8 +19,12 @@ func NewOpenAIResponses(cfg Profile) Provider { return &openaiResponsesProvider{
 
 // Stream 见 Provider。
 func (p *openaiResponsesProvider) Stream(ctx context.Context, req Request) (<-chan Event, error) {
+	model := req.Model
+	if model == "" || model == "auto" {
+		model = p.cfg.Model
+	}
 	payload := map[string]any{
-		"model":       req.Model,
+		"model":       model,
 		"max_output_tokens": max(req.MaxTokens, 1),
 		"stream":      true,
 	}

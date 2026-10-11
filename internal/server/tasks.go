@@ -159,6 +159,7 @@ func (s *Server) launchEngine(taskID int64, pool llm.Provider, maxTokens int) {
 		Model:      "auto",
 		MaxTokens:  maxTokens,
 		Workers:    2, Debounce: 500 * time.Millisecond,
+		CtxWindowK: 120, // 120K token 窗口（GLM 兼容；profile 细化 M3 接）
 		Perms: s.guard.ForTask(taskID),
 		ActivityFn: func(intentID int64, role, kind, payload string) {
 			_, _ = s.store.Exec(sqlCtx(),

@@ -1,6 +1,7 @@
 package agents
 
 import (
+	"os"
 	"time"
 
 	"mtx/internal/graph"
@@ -117,7 +118,10 @@ func AssembleGoals(deps CommonDeps, ec ExecContext) harness.Options {
 	}
 }
 
-// workspaceRoot 是 worker 文件工具根（沙箱工作区；M0 用任务数据目录约定）。
+// workspaceRoot 是 worker 文件工具根（沙箱 /workspace；本地模式走 DataDir）。
 func workspaceRoot(ec ExecContext) string {
+	if root := os.Getenv("MTX_WORKROOT"); root != "" {
+		return root
+	}
 	return "/workspace"
 }

@@ -2,10 +2,10 @@ package llm
 
 import (
 	"bufio"
+	"fmt"
 	"bytes"
 	"context"
 	"encoding/json"
-	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -52,8 +52,12 @@ func (p *anthropicProvider) Stream(ctx context.Context, req Request) (<-chan Eve
 }
 
 func (p *anthropicProvider) buildBody(req Request) ([]byte, error) {
+	model := req.Model
+	if model == "" || model == "auto" {
+		model = p.cfg.Model // 引擎传 "auto" 时用 profile 模型名兜底
+	}
 	payload := map[string]any{
-		"model":      req.Model,
+		"model":      model,
 		"max_tokens": max(req.MaxTokens, 1),
 		"stream":     true,
 	}
@@ -85,11 +89,8 @@ func (p *anthropicProvider) buildBody(req Request) ([]byte, error) {
 			case BlockText:
 				blocks = append(blocks, map[string]any{"type": "text", "text": b.Text})
 			case BlockThinking:
-				tb := map[string]any{"type": "thinking", "thinking": b.Text}
-				if b.ThinkingSig != "" {
-					tb["signature"] = b.ThinkingSig
-				}
-				blocks = append(blocks, tb)
+				// GLM 兼容：thinking 块是输出形态，回传输入会报 1214 参数非法——跳过。
+				continue
 			case BlockToolUse:
 				var in any
 				if json.Valid([]byte(b.InputJSON)) {
@@ -105,6 +106,11 @@ func (p *anthropicProvider) buildBody(req Request) ([]byte, error) {
 				}
 				blocks = append(blocks, tb)
 			}
+		}
+		// GLM 兼容（线上 1214）：content 为空数组会被判 messages 非法——整条跳过
+		//（如剥离 thinking 后的纯思考轮 assistant 消息）。
+		if len(blocks) == 0 {
+			continue
 		}
 		msgs = append(msgs, map[string]any{"role": string(m.Role), "content": blocks})
 	}

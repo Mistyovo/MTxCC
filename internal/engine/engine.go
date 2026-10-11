@@ -32,6 +32,7 @@ type Deps struct {
 	Workers    int
 	Debounce   time.Duration // planner 唤醒合并窗口（默认 800ms；测试调小）
 	MaxTokens  int           // profile.max_tokens 透传（C3）
+	CtxWindowK int           // 上下文窗口（千 token，压缩阈值用）
 	Workroot   string        // worker/expert 文件根（沙箱 /workspace 或本地 dataDir）
 	ActivityFn func(intentID int64, role, kind, payload string) // 事件落库回调，可 nil
 }
@@ -250,6 +251,7 @@ func (e *Engine) runIntent(ctx context.Context, intent graph.Node) {
 		Model:      e.Deps.Model,
 		MaxTurns:   e.MaxTurns,
 		MaxTokens:  e.Deps.MaxTokens,
+		CtxWindowK: e.Deps.CtxWindowK,
 		Workroot:   e.Deps.Workroot,
 	}
 	opts := agents.AssembleWorker(deps, ec, intent)

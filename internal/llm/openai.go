@@ -50,8 +50,12 @@ func (p *openaiProvider) setHeaders(h http.Header) {
 }
 
 func (p *openaiProvider) buildBody(req Request) ([]byte, error) {
+	model := req.Model
+	if model == "" || model == "auto" {
+		model = p.cfg.Model
+	}
 	payload := map[string]any{
-		"model":           req.Model,
+		"model":           model,
 		"max_tokens":      max(req.MaxTokens, 1),
 		"stream":          true,
 		"stream_options":  map[string]any{"include_usage": true},
