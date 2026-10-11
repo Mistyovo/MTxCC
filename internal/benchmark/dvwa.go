@@ -1,5 +1,7 @@
 package benchmark
 
+import "fmt"
+
 // DVWAAdapter 本地 DVWA 靶场（docker compose --profile demo）。
 // 跑分逻辑：每类漏洞一道题，flag 确认由 MTxCC worker 真实触发后比对。
 type DVWAAdapter struct {
