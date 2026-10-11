@@ -28,6 +28,12 @@ func TestParseTextToolCalls(t *testing.T) {
 			wantCmd:  `{"path":"a.txt"}`,
 		},
 		{
+			// 真实 qwen 输出形态：首尾双括号包裹、内部单括号（线上 transcript 抓到）。
+			text:     "<tool_call>\n{{\"name\": \"bash\", \"arguments\": {\"command\": \"for i in 2 3; do echo $i\"}}\n</tool_call>",
+			wantName: "bash",
+			wantCmd:  `{"command":"for i in 2 3; do echo $i"}`,
+		},
+		{
 			// 单行形态。
 			text:     `<tool_call>{"name": "list", "arguments": {}}</tool_call>`,
 			wantName: "list",
