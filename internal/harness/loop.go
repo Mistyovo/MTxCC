@@ -115,6 +115,26 @@ func (s *Session) Query(ctx context.Context, system, user string) (QueryResult, 
 			return res, nil
 		}
 
+		// 文本协议工具调用（弱模型 fallback）：assistant 文本里嵌 tool_use 块
+		// → 转为标准 tool_use blocks 继续执行（调研 T3MP3ST 文本协议设计）。
+		if countToolUse(assistant) == 0 {
+			if calls := ParseTextToolCalls(textOf(assistant)); len(calls) > 0 {
+				for i, c := range calls {
+					assistant.Blocks = append(assistant.Blocks, llm.Block{
+						Type: llm.BlockToolUse,
+						ID:   textToolID(i),
+						Name: c.Name,
+						InputJSON: c.InputJSON,
+					})
+				}
+				s.append(assistant)
+				res.Turns++
+				results := s.execTools(ctx, assistant)
+				s.append(llm.Message{Role: llm.RoleUser, Blocks: results})
+				continue
+			}
+		}
+
 		// 无工具调用：本轮即最终回复。
 		if countToolUse(assistant) == 0 {
 			res.FinalText = textOf(assistant)
@@ -336,4 +356,9 @@ func reasonFromStop(stop string) TerminalReason {
 	default:
 		return ReasonCompleted // tool_use 之外的罕见 stop 原因按完成处理
 	}
+}
+
+// textToolID 为文本协议工具调用生成 ID。
+func textToolID(i int) string {
+	return "ttool-" + string(rune('a'+i)) + "-auto"
 }
