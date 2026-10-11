@@ -49,13 +49,48 @@ type Options struct {
 	MaxDuration    time.Duration // 0 = 不限
 	ToolConcurrency int          // 0 = 默认 10
 	System         string        // Query 可覆盖
+
+	// Settlement 收尾（spec §2 超越点 4）：预算命中时注入收尾指令、禁副作用工具、
+	// 换独立轮数预算（10 轮）让 agent 把已识别内容写回后再结束；终态仍记 MaxTurns/Timeout。
+	Settlement          bool
+	SettlementKeepTools []string // 收尾期间保留的非只读工具（写回类：record_fact 等）
 }
+
+// settlementPrompt 是收尾阶段注入的固定追加段（代码常量，DB 不可编辑）。
+const settlementPrompt = `
+【收尾阶段】你的常规预算已耗尽。现在只做一件事：把本次已经确认的知识写回——
+用可用的写回工具（如 record_fact / insert_assets / report_finding）把已识别的
+事实、资产与发现落库，然后输出一段简短总结文本结束。禁止再执行任何探测或命令。
+写回完成或无内容可写时，立即以纯文本结束。`
 
 // Session 持有一个 agent 会话的历史与循环选项。
 type Session struct {
-	opts    Options
-	id      string
-	history []llm.Message
+	opts       Options
+	id         string
+	history    []llm.Message
+	settleMode bool
+}
+
+// settleMaxTurns 是收尾阶段的独立轮数预算（spec §2 超越点 4）。
+const settleMaxTurns = 10
+
+// beginSettlement 进入收尾：置位 + 禁用副作用工具（保留只读与白名单写回类）。
+func (s *Session) beginSettlement(_ string) {
+	s.settleMode = true
+	if s.opts.Tools == nil {
+		return
+	}
+	keep := map[string]bool{}
+	for _, n := range s.opts.SettlementKeepTools {
+		keep[n] = true
+	}
+	var disable []string
+	for _, t := range s.opts.Tools.List() {
+		if !t.Flags().ReadOnly && !keep[t.Name()] {
+			disable = append(disable, t.Name())
+		}
+	}
+	s.opts.Tools.Disable(disable...)
 }
 
 // NewSession 建立会话。

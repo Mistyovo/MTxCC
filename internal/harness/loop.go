@@ -13,6 +13,9 @@ import (
 // Query 执行主循环：模型流式响应 → 聚合 assistant 消息 → 并发执行 tool_use →
 // 结果按 tool_use_id 回填 → 下一轮；无 tool_use 即完成（spec §6/计划 Task 7）。
 func (s *Session) Query(ctx context.Context, system, user string) (QueryResult, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	if s.opts.MaxDuration > 0 {
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(ctx, s.opts.MaxDuration)
@@ -23,14 +26,25 @@ func (s *Session) Query(ctx context.Context, system, user string) (QueryResult, 
 	s.append(llm.Message{Role: llm.RoleUser, Blocks: []llm.Block{{Type: llm.BlockText, Text: user}}})
 
 	for {
-		// 预算检查（轮边界）。
-		if res.Turns >= s.opts.MaxTurns {
+		// 预算检查（轮边界）。收尾阶段换用独立预算。
+		budget := s.opts.MaxTurns
+		if s.settleMode {
+			budget = s.opts.MaxTurns + settleMaxTurns
+		}
+		if res.Turns >= budget {
+			if s.opts.Settlement && !s.settleMode {
+				s.beginSettlement(system)
+				continue
+			}
 			res.Reason = ReasonMaxTurns
+			res.Settled = s.settleMode
 			return res, nil
 		}
-		if err := ctx.Err(); err != nil {
-			res.Reason = ReasonTimeout
-			return res, nil
+		if !s.settleMode {
+			if err := ctx.Err(); err != nil {
+				res.Reason = ReasonTimeout
+				return res, nil
+			}
 		}
 
 		// 压缩（可选）。
@@ -48,6 +62,9 @@ func (s *Session) Query(ctx context.Context, system, user string) (QueryResult, 
 			System:   system,
 			Messages: view,
 			Tools:    s.toolSpecs(),
+		}
+		if s.settleMode {
+			req.System = system + settlementPrompt // 收尾指令追加（代码常量）
 		}
 		ch, err := s.opts.Provider.Stream(ctx, req)
 		if err != nil {
@@ -80,8 +97,13 @@ func (s *Session) Query(ctx context.Context, system, user string) (QueryResult, 
 
 		// 无工具调用：本轮即最终回复。
 		if countToolUse(assistant) == 0 {
-			res.Reason = reasonFromStop(stopReason)
 			res.FinalText = textOf(assistant)
+			if s.settleMode {
+				res.Reason = ReasonMaxTurns // 收尾后终态不伪造 Completed（spec §2）
+				res.Settled = true
+			} else {
+				res.Reason = reasonFromStop(stopReason)
+			}
 			return res, nil
 		}
 
