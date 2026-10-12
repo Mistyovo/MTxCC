@@ -2,6 +2,8 @@ package roe
 
 import (
 	"net"
+	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 )
@@ -36,6 +38,14 @@ func ExtractTargets(cmd string) []string {
 	add := func(h string) {
 		h = strings.TrimSuffix(strings.ToLower(strings.TrimSpace(h)), ".")
 		if h == "" || seen[h] {
+			return
+		}
+		// 路径/脚本形态排除：含 / 的 token 是路径不是目标；脚本扩展名结尾的文件名
+		// 不是域名（实证 bug：ok.py 被误提为域名）。
+		if strings.Contains(h, "/") {
+			return
+		}
+		if isScriptFilename(h) {
 			return
 		}
 		// host:port 形态：拆分后按 host 判定合法性（端口级 scope 保留端口）。
@@ -126,3 +136,52 @@ func looksLikeTargeting(cmd string) bool {
 }
 
 func looksDomain(s string) bool { return domainRE.MatchString(s) || strings.Contains(s, ".") }
+
+// scriptExts 会被扫描内容的脚本扩展名（间接目标检测）。
+var scriptExts = []string{".py", ".sh", ".bash", ".rb", ".pl", ".ps1"}
+
+// scanScriptTargets 检测命令中引用的脚本文件并扫描其内容提取目标
+//（实证 gap：python 脚本内目标绕过命令行解析层）。
+func scanScriptTargets(cmd string) []string {
+	var out []string
+	for _, f := range strings.Fields(cmd) {
+		// 路径形态 token（含 .py/.sh）。
+		if !strings.Contains(f, ".") {
+			continue
+		}
+		isScript := false
+		for _, ext := range scriptExts {
+			if strings.HasSuffix(f, ext) {
+				isScript = true
+				break
+			}
+		}
+		if !isScript {
+			continue
+		}
+		path := f
+		if !filepath.IsAbs(path) {
+			path = filepath.Join(".", path)
+		}
+		b, err := os.ReadFile(path)
+		if err != nil {
+			continue
+		}
+		out = append(out, ExtractTargets(string(b))...)
+		// 脚本内容含疑似目标但提取不到 → fail-closed 信号（返回哨兵）。
+		if looksLikeTargeting(string(b)) && len(ExtractTargets(string(b))) == 0 {
+			out = append(out, "__UNRESOLVED_SCRIPT__")
+		}
+	}
+	return out
+}
+
+// isScriptFilename 判定 token 是否为脚本文件名（非域名）。
+func isScriptFilename(h string) bool {
+	for _, ext := range scriptExts {
+		if strings.HasSuffix(h, ext) {
+			return true
+		}
+	}
+	return false
+}

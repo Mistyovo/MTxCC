@@ -29,6 +29,8 @@ func EvaluateCommand(cmd string, r Rules) Decision {
 		}
 	}
 	targets := ExtractTargets(cmd)
+	// 脚本间接目标（实证 gap）：扫描命令引用的脚本内容。
+	targets = append(targets, scanScriptTargets(cmd)...)
 	if len(targets) == 0 {
 		// 无目标无害命令（echo/ls 等）：放行；含目标位语法但全为变量 → 同样零目标，
 		// 这里无法区分——按 fail-closed 原则：命令中出现 $VAR/@host 类"疑似目标未解析"即拒。
@@ -38,6 +40,9 @@ func EvaluateCommand(cmd string, r Rules) Decision {
 		return Decision{true, "无目标命令"}
 	}
 	for _, t := range targets {
+		if t == "__UNRESOLVED_SCRIPT__" {
+			return Decision{false, "脚本内容含无法解析的目标（fail-closed，间接目标检测）"}
+		}
 		if d := EvaluateTarget(t, r); !d.Allow {
 			return d
 		}

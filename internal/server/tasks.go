@@ -129,8 +129,9 @@ func (s *Server) handleCreateTask(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	// 种子意图：首轮直接派一条"全量侦察"意图，planner 随后接管。
-	if _, err := s.graph.AddIntent(sqlCtx(), expID, nil, "对目标 "+targetHost(in.TargetText)+" 做初始侦察（端口/服务/Web 指纹）", 5, nil); err != nil {
+	// 种子意图：聚焦具体目标（实证 gap：宽泛表述导致打整机）。
+	seed := "对 " + in.TargetText + " 做初始侦察（端口/服务/Web 指纹，仅限此目标）"
+	if _, err := s.graph.AddIntent(sqlCtx(), expID, nil, seed, 5, nil); err != nil {
 		errJSON(w, 500, err.Error())
 		return
 	}
