@@ -7,13 +7,15 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"time"
 )
 
 // XBowLocal 是 XBOW Validation Benchmark 本地模式 adapter
 //（实证：PurpleAILAB/xbow-validation-benchmarks 开源仓库，无需 token）。
 // 题目目录结构：benchmarks/XBEN-xxx-24/{.env(FLAG), Makefile, README.md, docker-compose.yml, app/, mysql/}。
 type XBowLocal struct {
-	BenchDir string // 仓库根或 benchmarks 目录
+	BenchDir string  // 仓库根或 benchmarks 目录
+	Exec     CmdExec // 命令执行器（测试注入 fakeExec）
 }
 
 // NewXBowLocal 建本地 adapter。
@@ -95,12 +97,46 @@ func (a *XBowLocal) CheckFlag(id, flag string) bool {
 	return strings.TrimSpace(flag) == want
 }
 
-// StartChallenge 构建并起靶场（docker compose up -d --wait），返回访问 URL。
-// FLAG 随机注入（与官方 autobuild 一致）。
+// StartChallenge 构建并起靶场（docker compose build --build-arg flag= → up -d --wait），
+// 返回访问 URL。
 func (a *XBowLocal) StartChallenge(id string) (string, error) {
-	// 由 runner 的 compose 执行器接线（M3 末）：此处返回约定端口。
-	return "", fmt.Errorf("启动需 compose 执行器接线（见 runner）")
+	dir := a.challengeDir(id)
+	e := NewComposeExecutor(dir)
+	if a.Exec != nil {
+		e.Exec = a.Exec
+	}
+	flag, err := a.FlagOf(id)
+	if err != nil {
+		flag = "flag{" + randomHex16() + "}"
+	}
+	if _, err := e.Build(flag); err != nil {
+		return "", fmt.Errorf("build: %w", err)
+	}
+	if _, err := e.Up(); err != nil {
+		return "", fmt.Errorf("up: %w", err)
+	}
+	port, err := e.Port()
+	if err != nil {
+		return "", fmt.Errorf("port: %w", err)
+	}
+	return "http://127.0.0.1:" + port, nil
 }
 
-// StopChallenge 见 Adapter。
-func (a *XBowLocal) StopChallenge(id string) error { return nil }
+// StopChallenge 停止并清理靶场。
+func (a *XBowLocal) StopChallenge(id string) error {
+	e := NewComposeExecutor(a.challengeDir(id))
+	if a.Exec != nil {
+		e.Exec = a.Exec
+	}
+	_, err := e.Down()
+	return err
+}
+
+// randomHex16 随机 flag 后缀。
+func randomHex16() string {
+	b := make([]byte, 8)
+	for i := range b {
+		b[i] = "0123456789abcdef"[int(time.Now().UnixNano()+int64(i))%16]
+	}
+	return string(b)
+}
