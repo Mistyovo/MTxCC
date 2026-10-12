@@ -4,6 +4,7 @@ package server
 
 import (
 	"context"
+	"fmt"
 	"encoding/json"
 	"net/http"
 	"strings"
@@ -125,4 +126,44 @@ func clip(s string) string {
 		return s[:80]
 	}
 	return s
+}
+
+// TestFindingRetest 复测闭环（Review Focus：retester 执行面）：
+// POST /api/findings/{id}/retest → oracle 复跑 → finding_retests 记录 + 状态流转。
+func TestFindingRetest(t *testing.T) {
+	base, tok, st := setupRBAC(t)
+	dctx := context.Background()
+
+	// 预置 task + finding（evidence 含 replay）。
+	var taskID, fid int64
+	if err := st.QueryRow(dctx, `INSERT INTO tasks (title,target_text,status,created_at) VALUES ('t','x','created',now()) RETURNING id`).Scan(&taskID); err != nil {
+		t.Fatal(err)
+	}
+	evidence := `[{"kind":"replay","url":"http://127.0.0.1:9/x","expect_body":"NOPE"}]`
+	err := st.QueryRow(dctx, `INSERT INTO findings (task_id, vulnclass, severity, title, summary, evidence, confidence, status, verify_state, created_at)
+		VALUES ($1,'test','medium','T','S',$2::jsonb,'runtime_observed','candidate','unconfirmed',now()) RETURNING id`, taskID, evidence).Scan(&fid)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	r, b := apiCall(t, "POST", base+"/api/findings/"+itoa(fid)+"/retest", tok, nil)
+	if r.StatusCode != 200 {
+		t.Fatalf("retest: %d %s", r.StatusCode, b)
+	}
+	// finding_retests 有记录。
+	var n int
+	_ = st.QueryRow(dctx, `SELECT count(*) FROM finding_retests WHERE finding_id=$1`, fid).Scan(&n)
+	if n != 1 {
+		t.Fatalf("retests 记录 = %d, want 1", n)
+	}
+	// 复测未命中 → inconclusive（不是武断 fixed）。
+	var concl string
+	_ = st.QueryRow(dctx, `SELECT conclusion FROM finding_retests WHERE finding_id=$1`, fid).Scan(&concl)
+	if concl != "inconclusive" {
+		t.Fatalf("conclusion = %q, want inconclusive（特征未复现但不武断）", concl)
+	}
+}
+
+func itoa(v int64) string {
+	return fmt.Sprintf("%d", v)
 }

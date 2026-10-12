@@ -2,6 +2,7 @@ package server
 
 import (
 	"mtx/internal/report"
+	"mtx/internal/verify"
 	"encoding/json"
 	"fmt"
 	"net"
@@ -206,4 +207,51 @@ func (s *Server) handleTaskReport(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/markdown; charset=utf-8")
 	_, _ = w.Write([]byte(md))
 	s.audit(r, "report.export", "task", fmt.Sprint(taskID), nil)
+}
+
+// handleFindingRetest 复测闭环：oracle 复跑 → finding_retests 记录 → 状态流转
+//（reproduced→verified / inconclusive→保持 / fixed→status=fixed）。
+func (s *Server) handleFindingRetest(w http.ResponseWriter, r *http.Request) {
+	var fid int64
+	if _, err := fmt.Sscanf(r.PathValue("id"), "%d", &fid); err != nil {
+		errJSON(w, http.StatusBadRequest, "bad id")
+		return
+	}
+	var evidence string
+	var status, verifyState string
+	if err := s.store.QueryRow(sqlCtx(),
+		`SELECT evidence::text, status, verify_state FROM findings WHERE id=$1`, fid).
+		Scan(&evidence, &status, &verifyState); err != nil {
+		errJSON(w, 404, "finding 不存在")
+		return
+	}
+
+	// 机器复测（oracle）。
+	v := verify.AutoVerify(verify.RealSleeper(), evidence)
+	conclusion := "inconclusive"
+	switch {
+	case v == verify.Verified:
+		conclusion = "reproduced"
+	case status == "fixed":
+		conclusion = "fixed"
+	}
+
+	_, err := s.store.Exec(sqlCtx(),
+		`INSERT INTO finding_retests (finding_id, conclusion, detail, created_at)
+		 VALUES ($1,$2,$3,now())`, fid, conclusion, "自动复测：oracle "+v.String())
+	if err != nil {
+		errJSON(w, 500, err.Error())
+		return
+	}
+	// 状态流转。
+	switch conclusion {
+	case "reproduced":
+		_, _ = s.store.Exec(sqlCtx(),
+			`UPDATE findings SET verify_state='verified', status='verified' WHERE id=$1`, fid)
+	case "fixed":
+		_, _ = s.store.Exec(sqlCtx(),
+			`UPDATE findings SET status='fixed' WHERE id=$1`, fid)
+	}
+	s.audit(r, "finding.retest", "finding", fmt.Sprint(fid), map[string]string{"conclusion": conclusion})
+	writeJSON(w, 200, map[string]any{"conclusion": conclusion, "verify_state": v.String()})
 }

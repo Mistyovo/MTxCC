@@ -204,6 +204,10 @@ func (s *Server) Router() http.Handler {
 	// 报告导出。
 	inner.HandleFunc("GET /api/tasks/{id}/report", s.handleTaskReport)
 
+	// 复测（operator+）。
+	inner.Handle("POST /api/findings/{id}/retest",
+		s.requireRole("admin", "operator")(http.HandlerFunc(s.handleFindingRetest)))
+
 	// 内嵌前端（/ 与非 /api 静态路径）。
 	inner.Handle("/", webHandler())
 
