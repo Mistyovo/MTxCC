@@ -171,3 +171,32 @@ func TestTriedLedger(t *testing.T) {
 		t.Fatalf("死账 = %v", dead)
 	}
 }
+
+// TestAddIntentJaccardReject 换皮拒绝（反僵化机制化，调研 RedAmon Jaccard 设计）：
+// 新意图标题与已死向量（≥2 次失败）标题相似度 >0.6 → 拒绝重派（强制换打法）。
+func TestAddIntentJaccardReject(t *testing.T) {
+	ctx, g, _, expID := setup(t)
+
+	// 同标题试两次失败 → 死向量。
+	_ = g.MarkTried(ctx, expID, "sqli", "Redis 6379 未授权打穿：键枚举写入 CONFIG 评估 RCE", "wandering")
+	_ = g.MarkTried(ctx, expID, "sqli", "Redis 6379 未授权打穿：键枚举写入 CONFIG 评估 RCE", "wandering")
+
+	// 同义换皮标题 → 拒。
+	if _, err := g.AddIntent(ctx, expID, nil, "Redis 6379 未授权打穿：键枚举与写入 CONFIG 读取评估 RCE", 5, nil); err == nil {
+		t.Fatal("换皮意图应被拒绝（Jaccard>0.6）")
+	}
+	// 全新方向 → 放行。
+	if _, err := g.AddIntent(ctx, expID, nil, "DVWA 4280 登录后命令注入测试", 5, nil); err != nil {
+		t.Fatalf("新方向应放行: %v", err)
+	}
+}
+
+// TestJaccardHelper 相似度边界。
+func TestJaccardHelper(t *testing.T) {
+	if jaccard("Redis 6379 未授权打穿", "Redis 6379 未授权打穿") < 0.99 {
+		t.Fatal("相同应接近 1")
+	}
+	if jaccard("Redis 6379 未授权打穿", "DVWA 登录命令注入") > 0.3 {
+		t.Fatal("无关应低")
+	}
+}

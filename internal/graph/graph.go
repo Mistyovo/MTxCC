@@ -101,8 +101,49 @@ func (g *GraphStore) Frontier(ctx context.Context, expID int64, limit int) ([]No
 	return out, rows.Err()
 }
 
+// JaccardRejectThreshold 换皮拒绝阈值（反僵化机制化，调研 RedAmon）。
+const JaccardRejectThreshold = 0.6
+
+// jaccard 计算分词集合 Jaccard 相似度（bigram 字符级，对中英文皆可用）。
+func jaccard(a, b string) float64 {
+	if a == "" || b == "" {
+		return 0
+	}
+	bi := func(s string) map[string]bool {
+		out := map[string]bool{}
+		r := []rune(s)
+		for i := 0; i+1 < len(r); i++ {
+			out[string(r[i:i+2])] = true
+		}
+		if len(r) == 1 {
+			out[string(r)] = true
+		}
+		return out
+	}
+	as, bs := bi(a), bi(b)
+	inter := 0
+	for k := range as {
+		if bs[k] {
+			inter++
+		}
+	}
+	union := len(as) + len(bs) - inter
+	if union == 0 {
+		return 0
+	}
+	return float64(inter) / float64(union)
+}
+
 // AddIntent 派生意图（parent 必须 fact|finding——意图必须锚在已确认知识上）。
+// 换皮拒绝：与死向量标题相似度 >阈值 的意图拒绝（强制换打法，反僵化机制化）。
 func (g *GraphStore) AddIntent(ctx context.Context, expID int64, parentIDs []int64, title string, priority int, anchorAssets []int64) ([]int64, error) {
+	// 换皮检测（Review Focus：反僵化机制化）。
+	dead := g.DeadVectors(ctx, expID)
+	for k := range dead {
+		if jaccard(title, k.TargetKey) > JaccardRejectThreshold {
+			return nil, fmt.Errorf("换皮拒绝：与已试死向量 %q 相似度过高（Jaccard>%.1f），必须换打法/换向量", k.TargetKey, JaccardRejectThreshold)
+		}
+	}
 	for _, pid := range parentIDs {
 		var kind string
 		if err := g.s.QueryRow(ctx,
