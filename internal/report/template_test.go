@@ -31,3 +31,21 @@ func TestCustomTemplate(t *testing.T) {
 		t.Fatal("回退内容应为默认报告")
 	}
 }
+
+// TestRenderHTML 报告 HTML 格式（打印即 PDF 的合规交付）：
+// 含样式、发现分级表、证据链，浏览器可直接打印。
+func TestRenderHTML(t *testing.T) {
+	data := Data{
+		TaskID: 7, TargetText: "http://10.0.0.5", Status: "done",
+		Findings: []Finding{{
+			ID: 1, Severity: "critical", Title: "RCE", VerifyState: "verified",
+			Summary: "命令注入", Evidence: []Evidence{{Kind: "tool_output", Ref: "a#1", Excerpt: "uid=0"}},
+		}},
+	}
+	html := RenderHTML(data)
+	for _, want := range []string{"<html", "RCE", "uid=0", "@media print", "critical"} {
+		if !strings.Contains(html, want) {
+			t.Errorf("HTML 报告缺 %q", want)
+		}
+	}
+}

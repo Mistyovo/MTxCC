@@ -4,6 +4,7 @@ package report
 import (
 	"fmt"
 	"strings"
+	"time"
 )
 
 // Evidence 是发现的一条证据引用。
@@ -112,3 +113,66 @@ func clip(s string, n int) string {
 	}
 	return s
 }
+
+// RenderHTML 渲染打印友好的 HTML 报告（浏览器打印即 PDF——合规交付零依赖）。
+func RenderHTML(d Data) string {
+	counts := map[string]int{}
+	for _, f := range d.Findings {
+		counts[f.Severity]++
+	}
+	var rows, detail strings.Builder
+	for _, f := range sortFindings(d.Findings) {
+		vs := "候选（未过验证）"
+		if f.VerifyState == "verified" {
+			vs = "已验证"
+		}
+		fmt.Fprintf(&rows, "<tr><td>%d</td><td class=\"sev-%s\">%s</td><td>%s</td><td>%s</td></tr>\n",
+			f.ID, f.Severity, f.Severity, f.Title, vs)
+		fmt.Fprintf(&detail, "<section><h3>%s</h3><p><b>级别</b>：<span class=\"sev-%s\">%s</span> · <b>验证</b>：%s</p><p>%s</p>",
+			f.Title, f.Severity, f.Severity, f.VerifyState, f.Summary)
+		if len(f.Evidence) > 0 {
+			detail.WriteString("<h4>证据链</h4><ul>")
+			for _, e := range f.Evidence {
+				fmt.Fprintf(&detail, "<li><code>%s</code> %s — %s</li>", e.Kind, e.Ref, clip(e.Excerpt, 300))
+			}
+			detail.WriteString("</ul>")
+		}
+		detail.WriteString("</section>")
+	}
+	var sevLine []string
+	for _, s := range []string{"critical", "high", "medium", "low", "info"} {
+		if counts[s] > 0 {
+			sevLine = append(sevLine, fmt.Sprintf("%d %s", counts[s], s))
+		}
+	}
+	summary := "本次测试未发现可确认漏洞。"
+	if len(d.Findings) > 0 {
+		summary = fmt.Sprintf("共 %d 项发现：%s。", len(d.Findings), strings.Join(sevLine, " · "))
+	}
+
+	return fmt.Sprintf(`<!DOCTYPE html>
+<html lang="zh-CN"><head><meta charset="utf-8"><title>渗透测试报告 · 任务 #%d</title>
+<style>
+body{font-family:system-ui,sans-serif;max-width:900px;margin:2rem auto;line-height:1.7;color:#1a1a1a}
+h1{border-bottom:3px solid #1a1a1a;padding-bottom:.5rem}
+h3{margin-top:2rem;border-left:4px solid #1a1a1a;padding-left:.75rem}
+.sev-critical{color:#b91c1c;font-weight:700}.sev-high{color:#c2410c;font-weight:600}
+.sev-medium{color:#a16207}.sev-low{color:#15803d}.sev-info{color:#4b5563}
+table{width:100%%;border-collapse:collapse;margin:1rem 0}
+th,td{border:1px solid #d4d4d4;padding:.5rem;text-align:left}
+code{background:#f5f5f5;padding:.15rem .4rem;border-radius:3px;font-size:.9em}
+@media print{body{margin:0}.noprint{display:none}}
+</style></head><body>
+<div class="noprint"><button onclick="window.print()">🖨 打印 / 导出 PDF</button></div>
+<h1>渗透测试报告</h1>
+<p><b>任务</b>：#%d &nbsp; <b>目标</b>：<code>%s</code> &nbsp; <b>状态</b>：%s &nbsp; <b>日期</b>：%s</p>
+<h2>执行摘要</h2><p>%s</p>
+<h2>发现总表</h2>
+<table><tr><th>#</th><th>级别</th><th>标题</th><th>验证状态</th></tr>%s</table>
+<h2>发现详情</h2>%s
+<h2>修复建议</h2><p>按发现总表自上而下处理；每项建议见对应发现的处置说明。</p>
+<h2>免责声明</h2><p>本报告仅用于授权安全测试范围内的风险评估。</p>
+</body></html>`, d.TaskID, d.TaskID, d.TargetText, d.Status, timeNow().Format("2006-01-02"), summary, rows.String(), detail.String())
+}
+
+var timeNow = func() time.Time { return time.Now() }

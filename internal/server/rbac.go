@@ -210,10 +210,17 @@ func (s *Server) handleTaskReport(w http.ResponseWriter, r *http.Request) {
 		_ = json.Unmarshal([]byte(ev), &f.Evidence)
 		data.Findings = append(data.Findings, f)
 	}
-	md := report.RenderMarkdown(data)
-	w.Header().Set("Content-Type", "text/markdown; charset=utf-8")
-	_, _ = w.Write([]byte(md))
-	s.audit(r, "report.export", "task", fmt.Sprint(taskID), nil)
+	// 格式：?format=html（打印即 PDF）或默认 markdown。
+	if r.URL.Query().Get("format") == "html" {
+		html := report.RenderHTML(data)
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		_, _ = w.Write([]byte(html))
+	} else {
+		md := report.RenderMarkdown(data)
+		w.Header().Set("Content-Type", "text/markdown; charset=utf-8")
+		_, _ = w.Write([]byte(md))
+	}
+	s.audit(r, "report.export", "task", fmt.Sprint(taskID), map[string]string{"format": r.URL.Query().Get("format")})
 }
 
 // handleFindingRetest 复测闭环：oracle 复跑 → finding_retests 记录 → 状态流转
