@@ -17,6 +17,7 @@ import (
 	"mtx/internal/engine"
 	"mtx/internal/graph"
 	"mtx/internal/guard"
+	"mtx/internal/notify"
 	"mtx/internal/roe"
 	"mtx/internal/store"
 	"mtx/internal/traffic"
@@ -46,6 +47,7 @@ type Server struct {
 
 	traffic *traffic.Index
 	proxy   *traffic.ProxyServer
+	notify  *notify.Notifier
 }
 
 // New 建服务端：打开数据库（幂等迁移）并装配审批门。
@@ -63,6 +65,7 @@ func New(o Options) (*Server, error) {
 		s.store = st
 	}
 	s.graph = graph.NewGraphStore(s.store)
+	s.notify = notify.New()
 
 	// 流量留痕层（I7）：索引常开；代理可选。
 	if o.DataDir != "" {

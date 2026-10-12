@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"mtx/internal/agents"
+	"mtx/internal/notify"
 	"mtx/internal/harness"
 	"mtx/internal/report"
 	"mtx/internal/verify"
@@ -320,4 +321,31 @@ func (s *Server) handleTaskChat(w http.ResponseWriter, r *http.Request) {
 	}
 	s.audit(r, "task.chat", "task", fmt.Sprint(taskID), map[string]string{"message": in.Message})
 	writeJSON(w, 200, map[string]any{"reply": res.FinalText, "turns": res.Turns})
+}
+
+// handleAddChannel 注册通知通道（admin）。
+func (s *Server) handleAddChannel(w http.ResponseWriter, r *http.Request) {
+	var c notify.Channel
+	if err := readJSON(r, &c); err != nil {
+		errJSON(w, http.StatusBadRequest, "bad request")
+		return
+	}
+	if err := s.notify.Register(c); err != nil {
+		errJSON(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	s.audit(r, "notify.channel.add", "channel", c.Name, map[string]string{"type": c.Type})
+	writeJSON(w, 200, map[string]bool{"ok": true})
+}
+
+// handleTestNotify 发送测试通知。
+func (s *Server) handleTestNotify(w http.ResponseWriter, r *http.Request) {
+	if err := s.notify.Deliver(notify.Event{
+		Kind: "system.test", Title: "MTxCC 通知测试",
+		Detail: "通道连通性验证成功",
+	}); err != nil {
+		errJSON(w, 500, err.Error())
+		return
+	}
+	writeJSON(w, 200, map[string]bool{"ok": true})
 }
