@@ -25,6 +25,8 @@ type CommonDeps struct {
 	RunSeconds   int
 	Workroot     string // worker/expert 文件工具根目录
 	SkillsDir    string // 技能库目录（空则不启用）
+	SteerFn      func(intentID int64, msg string) error // planner 纠偏在跑 worker（I6）
+	KillFn       func(intentID int64) error             // planner 止损意图（I6）
 }
 
 // AssembleWorker 装配执行者（意图进 system 不可压缩；工具面=领域写回+bash+文件+traffic；
@@ -91,6 +93,9 @@ func AssemblePlanner(deps CommonDeps, ec ExecContext) harness.Options {
 	reg := tools.NewRegistry()
 	for _, t := range DomainTools(deps.Graph, ec) {
 		reg.Register(t) // planner 全量：含检索/意图派发
+	}
+	for _, t := range SteerTools(deps, ec) {
+		reg.Register(t) // 过程控制原语（I6：steer_work/kill_work）
 	}
 	maxTurns := deps.MaxTurns
 	if maxTurns <= 0 {

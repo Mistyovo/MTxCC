@@ -408,6 +408,8 @@ func (e *Engine) planOnce(ctx context.Context, finish func(string), trigger stri
 	deps := agents.CommonDeps{
 		Graph: e.Deps.Graph, Transcript: e.Deps.Transcript, Model: e.Deps.Model,
 		MaxTurns: 12, MaxTokens: e.Deps.MaxTokens,
+		SteerFn: e.Steer,
+		KillFn: func(intentID int64) error { return e.Kill(context.Background(), intentID) },
 	}
 	deps.MaxTurns = 12
 	opts := agents.AssemblePlanner(deps, ec)
