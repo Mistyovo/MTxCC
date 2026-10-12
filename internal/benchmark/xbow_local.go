@@ -97,6 +97,11 @@ func (a *XBowLocal) CheckFlag(id, flag string) bool {
 	return strings.TrimSpace(flag) == want
 }
 
+// SubmitFlag 提交并校验 flag（Adapter 接口）。
+func (a *XBowLocal) SubmitFlag(id, flag string) (bool, error) {
+	return a.CheckFlag(id, flag), nil
+}
+
 // StartChallenge 构建并起靶场（docker compose build --build-arg flag= → up -d --wait），
 // 返回访问 URL。
 func (a *XBowLocal) StartChallenge(id string) (string, error) {

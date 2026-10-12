@@ -212,6 +212,12 @@ func (s *Server) Router() http.Handler {
 	inner.Handle("POST /api/findings/{id}/retest",
 		s.requireRole("admin", "operator")(http.HandlerFunc(s.handleFindingRetest)))
 
+	// 任务模板（operator+ 建）。
+	inner.Handle("POST /api/templates",
+		s.requireRole("admin", "operator")(http.HandlerFunc(s.handleCreateTemplate)))
+	inner.Handle("POST /api/tasks/from-template",
+		s.requireRole("admin", "operator")(http.HandlerFunc(s.handleTaskFromTemplate)))
+
 	// mainagent 对话（operator+）。
 	inner.Handle("POST /api/tasks/{id}/chat",
 		s.requireRole("admin", "operator")(http.HandlerFunc(s.handleTaskChat)))

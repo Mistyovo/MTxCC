@@ -3,12 +3,14 @@ package server
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"strings"
 
 	"mtx/internal/agents"
 	"mtx/internal/notify"
+	"mtx/internal/roe"
 	"mtx/internal/harness"
 	"mtx/internal/report"
 	"mtx/internal/verify"
@@ -363,4 +365,98 @@ func (s *Server) handleTaskCoverage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, 200, cov)
+}
+
+// handleCreateTemplate 任务模板（预置 RoE+技能提示+超时）。
+func (s *Server) handleCreateTemplate(w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		Name           string          `json:"name"`
+		TargetPattern  string          `json:"target_pattern"`
+		RoE            json.RawMessage `json:"roe"`
+		SkillHints     []string        `json:"skill_hints"`
+		TimeoutSeconds int             `json:"timeout_seconds"`
+	}
+	if err := readJSON(r, &in); err != nil || in.Name == "" {
+		errJSON(w, http.StatusBadRequest, "name 必填")
+		return
+	}
+	if len(in.RoE) > 0 {
+		if _, err := roe.ParseRules(in.RoE); err != nil {
+			errJSON(w, http.StatusBadRequest, "RoE 无效: "+err.Error())
+			return
+		}
+	}
+	if in.TimeoutSeconds <= 0 {
+		in.TimeoutSeconds = 3600
+	}
+	_, err := s.store.Exec(sqlCtx(), `INSERT INTO task_templates (name, description, created_at)
+		VALUES ($1, $2, now())
+		ON CONFLICT (name) DO UPDATE SET description = EXCLUDED.description`,
+		in.Name, string(mustJSON(map[string]any{
+			"target_pattern": in.TargetPattern, "roe": in.RoE,
+			"skill_hints": in.SkillHints, "timeout_seconds": in.TimeoutSeconds,
+		})))
+	if err != nil {
+		// 表无 name 唯一约束时直接插入。
+		_, err = s.store.Exec(sqlCtx(), `INSERT INTO task_templates (name, description, created_at)
+			VALUES ($1, $2, now())`, in.Name, string(mustJSON(map[string]any{
+			"target_pattern": in.TargetPattern, "roe": in.RoE,
+			"skill_hints": in.SkillHints, "timeout_seconds": in.TimeoutSeconds,
+		})))
+		if err != nil {
+			errJSON(w, 500, err.Error())
+			return
+		}
+	}
+	s.audit(r, "template.create", "template", in.Name, nil)
+	writeJSON(w, 200, map[string]bool{"ok": true})
+}
+
+// handleTaskFromTemplate 从模板建任务。
+func (s *Server) handleTaskFromTemplate(w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		TemplateName string `json:"template_name"`
+		Target       string `json:"target"`
+	}
+	if err := readJSON(r, &in); err != nil || in.Target == "" {
+		errJSON(w, http.StatusBadRequest, "target 必填")
+		return
+	}
+	var desc string
+	if err := s.store.QueryRow(sqlCtx(),
+		`SELECT description FROM task_templates WHERE name=$1`, in.TemplateName).Scan(&desc); err != nil {
+		errJSON(w, 404, "模板不存在")
+		return
+	}
+	var tpl struct {
+		TargetPattern  string          `json:"target_pattern"`
+		RoE            json.RawMessage `json:"roe"`
+		TimeoutSeconds int             `json:"timeout_seconds"`
+	}
+	_ = json.Unmarshal([]byte(desc), &tpl)
+
+	target := tpl.TargetPattern
+	if target == "" {
+		target = in.Target
+	} else {
+		target = strings.ReplaceAll(target, "{{target}}", in.Target)
+	}
+	if tpl.TimeoutSeconds <= 0 {
+		tpl.TimeoutSeconds = 3600
+	}
+
+	// 复用建任务逻辑（内联调 handleCreateTask 的核心）。
+	body, _ := json.Marshal(map[string]any{
+		"target_text":     target,
+		"timeout_seconds": tpl.TimeoutSeconds,
+		"roe":             tpl.RoE,
+	})
+	r.Body = io.NopCloser(strings.NewReader(string(body)))
+	s.handleCreateTask(w, r)
+	s.audit(r, "task.from_template", "template", in.TemplateName, map[string]string{"target": in.Target})
+}
+
+func mustJSON(v any) []byte {
+	b, _ := json.Marshal(v)
+	return b
 }
