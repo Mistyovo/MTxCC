@@ -69,7 +69,11 @@ go test ./internal/tools/tmux/ -tags=tmux
 - [x] M0 内核：引擎/沙箱/RoE/审批/留痕/开箱即用（v0.1.0）
 - [x] M1 实战：专家委托、技能库（23 个）、机器 oracle 验证、报告生成、MCP、凭据 vault（v0.2.0）
 - [x] M2 产品：多用户 RBAC 四角色、审计链、模板、完整文档（v0.3.0）
-- [x] M3 成绩：基准 adapter（XBOW/DVWA/腾讯黑客松）+ mtx bench 一键跑分（v0.4.0）
+- [x] M3 成绩：基准 adapter + mtx bench 一键跑分（v0.4.0）
+- [x] v0.5 实证：DVWA 双漏洞打穿 15 findings（v0.5.0-validated）
+- [x] v0.6 强化（实测差距修复）：发现去重+oracle 卡门禁 / 成本记账 /
+  沙箱默认+端口级 RoE / Jaccard 反僵化 / 复测闭环 / steer 工具面 /
+  mainagent 对话操舵 / 技能库 40 个（GATE 硬门）/ 8 个线上 bug 修复
 
 ## 基准跑分
 
