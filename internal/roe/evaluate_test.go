@@ -136,3 +136,37 @@ func TestResolveNet(t *testing.T) {
 		t.Fatalf("通配域应允许: %+v", d)
 	}
 }
+
+// TestEvaluateTargetHostPort 端口级 scope（bench 收紧后语义）：
+// "127.0.0.1:4280" 只授权该端口；同 IP 其他端口拒绝；带端口目标精确匹配。
+func TestEvaluateTargetHostPort(t *testing.T) {
+	r := Rules{
+		Mode:    "enforce",
+		InScope: []string{"127.0.0.1:4280", "172.17.0.0/16"},
+	}
+	cases := []struct {
+		target string
+		want   bool
+	}{
+		{"127.0.0.1:4280", true},   // 精确命中端口
+		{"127.0.0.1:6379", false},  // 同 IP 其他端口拒（防误伤宿主机）
+		{"127.0.0.1", false},       // 不带端口不匹配端口级 scope
+		{"172.17.0.2:80", true},    // CIDR 段（不带端口限制）放行
+	}
+	for _, c := range cases {
+		if d := EvaluateTarget(c.target, r); d.Allow != c.want {
+			t.Errorf("EvaluateTarget(%q) = %v (%s), want %v", c.target, d.Allow, d.Reason, c.want)
+		}
+	}
+}
+
+// TestEvaluateCommandHostPort 命令层提取 host:port 目标并按端口级 scope 判定。
+func TestEvaluateCommandHostPort(t *testing.T) {
+	r := Rules{Mode: "enforce", InScope: []string{"127.0.0.1:4280"}}
+	if d := EvaluateCommand("curl http://127.0.0.1:4280/login", r); !d.Allow {
+		t.Fatalf("靶场端口应放行: %+v", d)
+	}
+	if d := EvaluateCommand("curl http://127.0.0.1:6379/", r); d.Allow {
+		t.Fatalf("非靶场端口应拒: %+v", d)
+	}
+}

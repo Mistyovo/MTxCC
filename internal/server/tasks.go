@@ -293,8 +293,13 @@ func pathParam(r *http.Request) string {
 	return r.PathValue("id")
 }
 
-// ensureSandbox 建任务专属加固容器并尽力注入出口围栏（C2b 生产路径）。
+// ensureSandbox 建任务专属加固容器（默认镜像）。
 func (s *Server) ensureSandbox(taskID int64) (*sandbox.Instance, error) {
+	return s.ensureSandboxWith(taskID, s.opts.SandboxImage)
+}
+
+// ensureSandboxWith 指定镜像建加固容器并尽力注入出口围栏（C2b 生产路径）。
+func (s *Server) ensureSandboxWith(taskID int64, image string) (*sandbox.Instance, error) {
 	cli, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
 	if err != nil {
 		return nil, err
@@ -302,7 +307,7 @@ func (s *Server) ensureSandbox(taskID int64) (*sandbox.Instance, error) {
 	m := sandbox.NewManager(cli)
 	dir := s.opts.DataDir + "/tasks"
 	inst, err := m.Ensure(context.Background(), sandbox.Spec{
-		Image: s.opts.SandboxImage,
+		Image: image,
 		Name:  fmt.Sprintf("mtx-task-%d", taskID),
 		WorkdirVol: dir,
 	})

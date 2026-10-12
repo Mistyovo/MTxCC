@@ -124,10 +124,36 @@ func matchAny(host string, pats []string) bool {
 	return false
 }
 
-// matchHostPattern 判定 host 是否命中一条 scope 模式：
-// CIDR（仅对 IP）、精确域名、*.example.com 通配、单 IP。
-func matchHostPattern(host, pat string) bool {
-	p := strings.TrimSuffix(strings.ToLower(strings.TrimSpace(pat)), ".")
+// matchHostPattern 判定目标是否命中一条 scope 模式（端口级语义）：
+// - scope 条目带端口（host:port）：目标必须同 host 且同端口（精确）
+// - scope 条目不带端口（CIDR/IP/域名/通配）：仅比 host，目标带端口也放行
+// - 目标不带端口而 scope 带端口：拒绝（端口级 scope 要求明确端口）
+func matchHostPattern(target, pat string) bool {
+	tHost, tPort, tHasPort := splitHostPort(target)
+	pHost, pPort, pHasPort := splitHostPort(strings.TrimSuffix(strings.ToLower(strings.TrimSpace(pat)), "."))
+
+	if pHasPort {
+		if !tHasPort || tPort != pPort {
+			return false
+		}
+	}
+	host := tHost
+	if !hostMatch(host, pHost) {
+		return false
+	}
+	return true
+}
+
+// splitHostPort 分解 host[:port]。
+func splitHostPort(s string) (host, port string, hasPort bool) {
+	if h, p, err := net.SplitHostPort(s); err == nil {
+		return h, p, true
+	}
+	return s, "", false
+}
+
+// hostMatch host 模式匹配（CIDR/精确/通配）。
+func hostMatch(host, p string) bool {
 	if ip := net.ParseIP(host); ip != nil {
 		if strings.Contains(p, "/") {
 			if _, ipnet, err := net.ParseCIDR(p); err == nil && ipnet.Contains(ip) {
@@ -138,7 +164,7 @@ func matchHostPattern(host, pat string) bool {
 	}
 	if strings.HasPrefix(p, "*.") {
 		suffix := strings.TrimPrefix(p, "*")
-		return strings.HasSuffix(host, suffix) // ".example.com" 后缀（含多级子域）
+		return strings.HasSuffix(host, suffix)
 	}
 	return host == p
 }

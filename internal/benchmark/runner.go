@@ -141,7 +141,8 @@ func (r *Runner) createTask(targetURL string) (int64, error) {
 		"timeout_seconds": to,
 		"roe": map[string]any{
 			"mode":     "enforce",
-			"in_scope": []string{"127.0.0.0/8", "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"},
+			"in_scope": []string{"127.0.0.1:4280", "172.17.0.0/16"}, // 精确到靶场（避免误伤宿主机其他服务）
+			"forbidden_tlds": []string{"gov", "mil"},
 		},
 	})
 	resp, err := r.api("POST", "/api/tasks", body)

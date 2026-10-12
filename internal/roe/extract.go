@@ -9,10 +9,10 @@ import (
 // URL/IP/域名/变量目标 的粗提取模式（bash 词法级，无完整 shell 解析——
 // 解析层承认可被绕过，egress 层兜底）。
 var (
-	urlRE    = regexp.MustCompile(`(?:https?|ftp|ssh)://(?:[^\s/@]+@)?(\[[0-9a-fA-F:.]+\]|[^\s/:]+)(?::\d+)?`)
+	urlRE    = regexp.MustCompile(`(?:https?|ftp|ssh)://(?:[^\s/@]+@)?(\[[0-9a-fA-F:.]+\]|[^\s/:]+(?::\d+)?)`)
 	ipRE     = regexp.MustCompile(`\b(?:\d{1,3}\.){3}\d{1,3}\b`)
 	domainRE = regexp.MustCompile(`\b(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]*[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}\b`)
-	atRE     = regexp.MustCompile(`\b[\w.-]+@([a-zA-Z0-9.-]+)`) // user@host
+	atRE     = regexp.MustCompile(`\b[\w.-]+@([a-zA-Z0-9.:-]+)`) // user@host[:port]
 	varRE    = regexp.MustCompile(`\$[A-Za-z_][A-Za-z0-9_]*|\$\{[^}]+\}`)
 )
 
@@ -38,6 +38,14 @@ func ExtractTargets(cmd string) []string {
 		if h == "" || seen[h] {
 			return
 		}
+		// host:port 形态：拆分后按 host 判定合法性（端口级 scope 保留端口）。
+		if host, _, err := net.SplitHostPort(h); err == nil {
+			if net.ParseIP(host) != nil || looksDomain(host) {
+				seen[h] = true
+				out = append(out, h)
+			}
+			return
+		}
 		if net.ParseIP(h) != nil || looksDomain(h) {
 			seen[h] = true
 			out = append(out, h)
@@ -56,6 +64,41 @@ func ExtractTargets(cmd string) []string {
 	for _, m := range domainRE.FindAllString(cmd, -1) {
 		add(m)
 	}
+	// 同 host 去重：host:port 形态优先（端口级 scope 需要具体端口，裸 host 会被误拒）。
+	return dedupByHost(out)
+}
+
+// dedupByHost 保留 host 形态最具体者（带端口 > 裸 host）。
+func dedupByHost(targets []string) []string {
+	best := map[string]string{} // host → target
+	order := []string{}
+	for _, t := range targets {
+		h := t
+		if host, _, err := net.SplitHostPort(t); err == nil {
+			h = host
+		}
+		if prev, ok := best[h]; ok {
+			// 已有带端口形态则保留它；否则新形态若是带端口则替换。
+			_, _, prevPort := net.SplitHostPort(prev)
+			_, _, newPort := net.SplitHostPort(t)
+			if prevPort == nil && newPort == nil {
+				continue // 都带端口或都不带：保持首个
+			}
+			if prevPort == nil && newPort != nil {
+				// 替换为带端口版本。
+				for i, x := range order {
+					if x == h {
+						order[i] = t
+					}
+				}
+				best[h] = t
+			}
+			continue
+		}
+		best[h] = t
+		order = append(order, t)
+	}
+	out := order
 	return out
 }
 
