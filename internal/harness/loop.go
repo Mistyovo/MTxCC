@@ -24,6 +24,7 @@ func (s *Session) Query(ctx context.Context, system, user string) (QueryResult, 
 	}
 
 	res := QueryResult{}
+	emptyRetries := 0
 	s.append(llm.Message{Role: llm.RoleUser, Blocks: []llm.Block{{Type: llm.BlockText, Text: user}}})
 
 	for {
@@ -119,6 +120,23 @@ func (s *Session) Query(ctx context.Context, system, user string) (QueryResult, 
 					})
 				}
 			}
+		}
+		// 空轮恢复（调研 cai _recover_after_empty_completion）：仅 thinking 无正文
+		// 无工具 ≠ 完成——注入恢复提醒重试，连续超限才按 ModelError 收场。
+		if isEffectivelyEmpty(assistant) {
+			emptyRetries++
+			if emptyRetries > 2 {
+				s.append(assistant)
+				res.FinalText = "（模型连续输出空回复，无法继续）"
+				res.Reason = ReasonModelError
+				return res, nil
+			}
+			s.append(assistant) // 空轮也留痕（transcript 可见 thinking）
+			s.append(llm.Message{Role: llm.RoleUser, Blocks: []llm.Block{{
+				Type: llm.BlockText,
+				Text: "（你的上一轮回复只有思考没有内容。请输出工具调用或文字结论。）",
+			}}})
+			continue
 		}
 		s.append(assistant)
 		res.Turns++
@@ -356,4 +374,19 @@ func reasonFromStop(stop string) TerminalReason {
 // textToolID 为文本协议工具调用生成 ID。
 func textToolID(i int) string {
 	return "ttool-" + string(rune('a'+i)) + "-auto"
+}
+
+// isEffectivelyEmpty 判定"实质空轮"：无 text、无 tool_use（thinking 不算内容）。
+func isEffectivelyEmpty(m llm.Message) bool {
+	for _, b := range m.Blocks {
+		switch b.Type {
+		case llm.BlockText:
+			if strings.TrimSpace(b.Text) != "" {
+				return false
+			}
+		case llm.BlockToolUse:
+			return false
+		}
+	}
+	return true
 }
