@@ -58,6 +58,9 @@ type Options struct {
 
 	// OnToolCall 工具级事件回调（引擎接 activity 落库）；可为 nil。
 	OnToolCall func(tool, input, result string, isErr bool)
+
+	// OnUsage 每轮用量回调（成本记账 → llm_records）；可为 nil。
+	OnUsage func(u llm.Usage)
 }
 
 // settlementPrompt 是收尾阶段注入的固定追加段（代码常量，DB 不可编辑）。

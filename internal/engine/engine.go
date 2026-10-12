@@ -37,6 +37,7 @@ type Deps struct {
 	RunSeconds int           // 单意图预算（0=默认 1200）
 	Workroot   string        // worker/expert 文件根（沙箱 /workspace 或本地 dataDir）
 	ActivityFn func(intentID int64, role, kind, payload string) // 事件落库回调，可 nil
+	UsageFn    func(role string, u llm.Usage)                   // 成本记账回调，可 nil
 }
 
 // Engine 是任务编排引擎。
@@ -284,6 +285,10 @@ func (e *Engine) runIntent(ctx context.Context, intent graph.Node) {
 				fmt.Sprintf(`{"tool":%q,"input":%s,"result":%.400q,"is_error":%v}`, tool, input, result, isErr))
 		}
 	}
+	if e.Deps.UsageFn != nil {
+		uf := e.Deps.UsageFn
+		opts.OnUsage = func(u llm.Usage) { uf("worker", u) }
+	}
 
 	retryDelay := e.RetryDelay
 	if retryDelay <= 0 {
@@ -409,6 +414,10 @@ func (e *Engine) planOnce(ctx context.Context, finish func(string), trigger stri
 	opts.Provider = e.Deps.Pool
 	opts.Transcript = e.Deps.Transcript
 	opts.Model = e.Deps.Model
+	if e.Deps.UsageFn != nil {
+		uf := e.Deps.UsageFn
+		opts.OnUsage = func(u llm.Usage) { uf("planner", u) }
+	}
 
 	sess := harness.NewSession(opts, fmt.Sprintf("t%d-planner", e.taskID))
 	if _, err := sess.Query(ctx, opts.System, user); err != nil {

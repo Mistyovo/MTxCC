@@ -165,6 +165,12 @@ func (s *Server) launchEngine(taskID int64, pool llm.Provider, maxTokens int) {
 				`INSERT INTO activity (task_id, node_id, agent_role, kind, payload) VALUES ($1,$2,$3,$4,$5::jsonb)`,
 				taskID, intentID, role, kind, payload)
 		},
+		UsageFn: func(role string, u llm.Usage) {
+			// 成本记账（spec §4.3）：实测 tokens_used=0 根因修复。
+			_, _ = s.store.Exec(sqlCtx(),
+				`INSERT INTO llm_records (task_id, agent_role, tok_in, tok_out, tok_cache, created_at)
+				 VALUES ($1,$2,$3,$4,$5,now())`, taskID, role, u.In, u.Out, u.CacheRead)
+		},
 	})
 	_ = agents.SeedPrompts(sqlCtx(), s.store)
 	s.mu.Lock()

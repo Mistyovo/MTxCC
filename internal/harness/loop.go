@@ -90,6 +90,9 @@ func (s *Session) Query(ctx context.Context, system, user string) (QueryResult, 
 		res.Usage.In += usage.In
 		res.Usage.Out += usage.Out
 		res.Usage.CacheRead += usage.CacheRead
+		if s.opts.OnUsage != nil && (usage.In > 0 || usage.Out > 0) {
+			s.opts.OnUsage(usage) // 成本记账（llm_records）
+		}
 		if streamErr != nil {
 			s.append(assistant) // 已聚合部分仍留痕
 			if ctx.Err() != nil {
