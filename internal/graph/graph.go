@@ -445,7 +445,7 @@ func (g *GraphStore) Coverage(ctx context.Context, taskID int64) (Coverage, erro
 	tested := map[string]bool{}
 	trows, err := g.s.Query(ctx, `SELECT a.key FROM exploration_anchors ea
 		JOIN exploration_nodes n ON n.id = ea.node_id
-		JOIN exploration e ON e.id = n.exploration_id
+		JOIN explorations e ON e.id = n.exploration_id
 		JOIN assets a ON a.id = ea.asset_id
 		WHERE n.kind = 'intent' AND e.task_id = $1`, taskID)
 	if err == nil {
