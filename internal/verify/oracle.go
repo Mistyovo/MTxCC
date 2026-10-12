@@ -3,6 +3,7 @@
 package verify
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -149,4 +150,54 @@ func matchFeatures(s Req, r response) bool {
 		}
 	}
 	return true
+}
+
+// EvidenceReplay 是 finding evidence 里的可重放条目（M3 自动验证）。
+type EvidenceReplay struct {
+	Kind        string `json:"kind"` // replay
+	URL         string `json:"url"`
+	ExpectBody  string `json:"expect_body"`
+	ExpectStatus int   `json:"expect_status"`
+}
+
+// RecipesFromEvidence 从 finding evidence JSON 提取重放配方。
+// 只认 kind=replay 条目；无 → 空（调用方按 candidate 处理，不武断 refuted）。
+func RecipesFromEvidence(evidenceJSON string) []Recipe {
+	var entries []EvidenceReplay
+	if err := json.Unmarshal([]byte(evidenceJSON), &entries); err != nil {
+		return nil
+	}
+	var out []Recipe
+	for _, e := range entries {
+		if e.Kind != "replay" || e.URL == "" {
+			continue
+		}
+		out = append(out, Recipe{Kind: "replay", Steps: []Req{{
+			Method: http.MethodGet, URL: e.URL,
+			ExpectBody: e.ExpectBody, ExpectStatus: e.ExpectStatus,
+			ExpectDiffersFrom: -1,
+		}}})
+	}
+	return out
+}
+
+// AutoVerify 对 finding evidence 全自动机器验证：
+// 提取 recipe → oracle 复跑 → 全部 verified 才返回 Verified，否则 Candidate（永不 refuted）。
+func AutoVerify(s Sleeper, evidenceJSON string) Verdict {
+	recipes := RecipesFromEvidence(evidenceJSON)
+	if len(recipes) == 0 {
+		return Candidate
+	}
+	o := NewOracle(s)
+	all := true
+	for _, r := range recipes {
+		v, err := o.Run(r)
+		if err != nil || v != Verified {
+			all = false
+		}
+	}
+	if all {
+		return Verified
+	}
+	return Candidate
 }

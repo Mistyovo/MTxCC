@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"mtx/internal/store"
@@ -51,6 +52,7 @@ type FindingIn struct {
 	Confidence string
 	Title      string
 	Summary    string
+	AssetKey   string // 资产标识（去重键：同 vulnclass+asset_key 合并）
 	Evidence   json.RawMessage
 }
 
@@ -201,11 +203,38 @@ func (g *GraphStore) InsertAssets(ctx context.Context, companyID int64, raw []Ra
 	return ids, nil
 }
 
+// sevRank 严重度排序（合并取高）。
+var sevRank = map[string]int{"info": 0, "low": 1, "medium": 2, "high": 3, "critical": 4}
+
 // ReportFinding 双写：finding 节点（血缘）+ findings 表（独立留存，任务删除不级联）。
 // severity≤confidence 天花板由 DB CHECK 强制（declared≤low/inferred≤medium）。
+// 同 (task, vulnclass, asset_key) 去重合并（实测问题：同类发现多条不同表述）。
 func (g *GraphStore) ReportFinding(ctx context.Context, taskID, expID, fromIntent int64, f FindingIn) (int64, error) {
 	if f.Evidence == nil {
 		f.Evidence = json.RawMessage(`[]`)
+	}
+
+	// 去重合并：同 task 同 vulnclass 同 asset_key 已存在 → 计数+1、severity 取高、evidence 追加。
+	if f.Vulnclass != "" && f.AssetKey != "" {
+		var existID int64
+		var existSev, existTitle string
+		err := g.s.QueryRow(ctx, `SELECT id, severity, title FROM findings
+			WHERE task_id=$1 AND vulnclass=$2 AND asset_key=$3 LIMIT 1`,
+			taskID, f.Vulnclass, f.AssetKey).Scan(&existID, &existSev, &existTitle)
+		if err == nil {
+			merged := existSev
+			if sevRank[f.Severity] > sevRank[existSev] {
+				merged = f.Severity
+			}
+			title := existTitle
+			if f.Title != "" && !strings.Contains(existTitle, f.Title) {
+				title = existTitle + " / " + f.Title
+			}
+			_, uerr := g.s.Exec(ctx, `UPDATE findings SET severity=$2, title=$3,
+				evidence = evidence || $4::jsonb WHERE id=$1`,
+				existID, merged, title, string(f.Evidence))
+			return existID, uerr
+		}
 	}
 	var nodeID int64
 	if err := g.s.QueryRow(ctx, `INSERT INTO exploration_nodes
@@ -217,9 +246,9 @@ func (g *GraphStore) ReportFinding(ctx context.Context, taskID, expID, fromInten
 	}
 	var id int64
 	err := g.s.QueryRow(ctx, `INSERT INTO findings
-		(task_id, node_id, vulnclass, severity, title, summary, evidence, confidence, status, created_at)
-		VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,$8,'candidate',now()) RETURNING id`,
-		taskID, nodeID, f.Vulnclass, f.Severity, f.Title, f.Summary, string(f.Evidence), f.Confidence).Scan(&id)
+		(task_id, node_id, vulnclass, severity, title, summary, evidence, confidence, status, asset_key, created_at)
+		VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,$8,'candidate',$9,now()) RETURNING id`,
+		taskID, nodeID, f.Vulnclass, f.Severity, f.Title, f.Summary, string(f.Evidence), f.Confidence, f.AssetKey).Scan(&id)
 	if err != nil {
 		// 回滚节点保持双写一致。
 		_, _ = g.s.Exec(ctx, `DELETE FROM exploration_nodes WHERE id=$1`, nodeID)

@@ -5,10 +5,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/url"
+	"regexp"
 	"strings"
 
 	"mtx/internal/graph"
 	"mtx/internal/tools"
+	"mtx/internal/verify"
 )
 
 // ExecContext 携带当前执行的任务/探索/意图上下文（工具内自动注入，模型不可指定）。
@@ -266,14 +269,19 @@ func (t *reportFindingTool) Call(ctx context.Context, input json.RawMessage) (st
 	if in.Severity == "" || in.Confidence == "" {
 		return "", fmt.Errorf("severity 与 confidence 必填（证据门需要）")
 	}
+	// 资产键提取（去重）：优先 evidence 里的 asset 字段，其次 URL 主机。
+	assetKey := extractAssetKey(in.Evidence, in.Summary)
 	id, err := t.g.ReportFinding(ctx, t.ec.TaskID, t.ec.ExpID, t.ec.IntentID, graph.FindingIn{
 		Vulnclass: in.Vulnclass, Severity: in.Severity, Confidence: in.Confidence,
 		Title: in.Title, Summary: in.Summary, Evidence: in.Evidence,
+		AssetKey: assetKey,
 	})
 	if err != nil {
 		return "", err
 	}
-	out, _ := json.Marshal(map[string]any{"finding_id": id, "status": "candidate"})
+	// 机器验证（oracle 卡门禁实测化）：evidence 含 replay → 自动复跑升级。
+	autoVerifyAfterReport(t.g, id, in.Evidence)
+	out, _ := json.Marshal(map[string]any{"finding_id": id, "status": "candidate", "asset_key": assetKey})
 	return string(out), nil
 }
 
@@ -424,4 +432,38 @@ func (t *searchTracesTool) Call(ctx context.Context, input json.RawMessage) (str
 func jsonEscape(s string) string {
 	b, _ := json.Marshal(s)
 	return string(b[1 : len(b)-1])
+}
+
+// autoVerifyAfterReport finding 写入后异步机器验证（spec §8.1 oracle 卡门禁实测化）：
+// evidence 含 replay 条目 → oracle 复跑 → 升级 verified / 保持 unconfirmed。
+func autoVerifyAfterReport(g *graph.GraphStore, findingID int64, evidence json.RawMessage) {
+	go func() {
+		v := verify.AutoVerify(verify.RealSleeper(), string(evidence))
+		state := "unconfirmed"
+		if v == verify.Verified {
+			state = "verified"
+		}
+		_, _ = g.DB().Exec(context.Background(),
+			`UPDATE findings SET verify_state=$2, status = CASE WHEN $2='verified' THEN 'verified' ELSE status END
+			 WHERE id=$1`, findingID, state)
+	}()
+}
+
+// extractAssetKey 从 evidence/summary 提取资产标识（去重键）。
+func extractAssetKey(evidence json.RawMessage, summary string) string {
+	var entries []map[string]any
+	_ = json.Unmarshal(evidence, &entries)
+	for _, e := range entries {
+		if u, ok := e["url"].(string); ok && u != "" {
+			if parsed, err := url.Parse(u); err == nil && parsed.Host != "" {
+				return parsed.Host
+			}
+		}
+	}
+	// 粗提 summary 里的 host:port。
+	re := regexp.MustCompile(`\b(?:\d{1,3}\.){3}\d{1,3}:\d{2,5}\b`)
+	if m := re.FindString(summary); m != "" {
+		return m
+	}
+	return ""
 }
