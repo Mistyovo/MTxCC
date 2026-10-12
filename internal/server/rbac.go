@@ -1,12 +1,16 @@
 package server
 
 import (
-	"mtx/internal/report"
-	"mtx/internal/verify"
 	"encoding/json"
 	"fmt"
 	"net"
 	"net/http"
+	"strings"
+
+	"mtx/internal/agents"
+	"mtx/internal/harness"
+	"mtx/internal/report"
+	"mtx/internal/verify"
 
 	"golang.org/x/crypto/bcrypt"
 )
@@ -254,4 +258,66 @@ func (s *Server) handleFindingRetest(w http.ResponseWriter, r *http.Request) {
 	}
 	s.audit(r, "finding.retest", "finding", fmt.Sprint(fid), map[string]string{"conclusion": conclusion})
 	writeJSON(w, 200, map[string]any{"conclusion": conclusion, "verify_state": v.String()})
+}
+
+// handleTaskChat mainagent 人在环路对话（操舵：add_hint/add_intent/steer_work）。
+func (s *Server) handleTaskChat(w http.ResponseWriter, r *http.Request) {
+	var taskID int64
+	if _, err := fmt.Sscanf(r.PathValue("id"), "%d", &taskID); err != nil {
+		errJSON(w, http.StatusBadRequest, "bad id")
+		return
+	}
+	var in struct{ Message string `json:"message"` }
+	if err := readJSON(r, &in); err != nil || strings.TrimSpace(in.Message) == "" {
+		errJSON(w, http.StatusBadRequest, "message 必填")
+		return
+	}
+	var expID int64
+	if err := s.store.QueryRow(sqlCtx(), `SELECT id FROM explorations WHERE task_id=$1`, taskID).Scan(&expID); err != nil {
+		errJSON(w, 404, "任务不存在")
+		return
+	}
+
+	pool, profiles, err := s.buildPool()
+	if err != nil {
+		errJSON(w, 400, "请先配置 LLM")
+		return
+	}
+	maxTokens := 8192
+	if len(profiles) > 0 {
+		maxTokens = profiles[0].MaxTokens
+	}
+	ec := agents.ExecContext{TaskID: taskID, ExpID: expID, Role: "mainagent"}
+	deps := agents.CommonDeps{
+		Graph: s.graph, MaxTokens: maxTokens,
+		SteerFn: func(intentID int64, msg string) error {
+			s.mu.Lock()
+			e := s.engines[taskID]
+			s.mu.Unlock()
+			if e == nil {
+				return fmt.Errorf("引擎未运行")
+			}
+			return e.Steer(r.Context(), intentID, msg)
+		},
+		KillFn: func(intentID int64) error {
+			s.mu.Lock()
+			e := s.engines[taskID]
+			s.mu.Unlock()
+			if e == nil {
+				return fmt.Errorf("引擎未运行")
+			}
+			return e.Kill(r.Context(), intentID)
+		},
+	}
+	opts := agents.AssembleMainAgent(deps, ec)
+	opts.Provider = pool
+	opts.Model = "auto"
+	sess := harness.NewSession(opts, fmt.Sprintf("t%d-mainagent", taskID))
+	res, err := sess.Query(r.Context(), opts.System, in.Message)
+	if err != nil {
+		errJSON(w, 500, err.Error())
+		return
+	}
+	s.audit(r, "task.chat", "task", fmt.Sprint(taskID), map[string]string{"message": in.Message})
+	writeJSON(w, 200, map[string]any{"reply": res.FinalText, "turns": res.Turns})
 }

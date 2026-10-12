@@ -5,6 +5,7 @@ package server
 import (
 	"context"
 	"fmt"
+	"net/http/httptest"
 	"encoding/json"
 	"net/http"
 	"strings"
@@ -166,4 +167,35 @@ func TestFindingRetest(t *testing.T) {
 
 func itoa(v int64) string {
 	return fmt.Sprintf("%d", v)
+}
+
+// TestTaskChatSteering mainagent 对话操舵（人在环路，ARTEX mainagent 对标）：
+// POST /api/tasks/{id}/chat 指令 → mainagent 会话 → add_intent 落意图。
+func TestTaskChatSteering(t *testing.T) {
+	// 假 LLM 网关（返回文本回复）。
+	fake := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("data: {\"choices\":[{\"delta\":{\"content\":\"收到，已派意图\"}}]}\n\ndata: [DONE]\n\n"))
+	}))
+	defer fake.Close()
+
+	base, tok, st := setupRBAC(t)
+	dctx := context.Background()
+	_, _ = st.Exec(dctx, `INSERT INTO llm_profiles (name,protocol,base_url,model,max_tokens,enabled) VALUES ('fake-chat','openai',$1,'fake',4096,true)`, fake.URL)
+	var taskID, expID int64
+	if err := st.QueryRow(dctx, `INSERT INTO tasks (title,target_text,status,created_at) VALUES ('t','10.0.0.5','running',now()) RETURNING id`).Scan(&taskID); err != nil {
+		t.Fatal(err)
+	}
+	_ = st.QueryRow(dctx, `INSERT INTO explorations (task_id,created_at) VALUES ($1,now()) RETURNING id`, taskID).Scan(&expID)
+	_, _ = st.Exec(dctx, `INSERT INTO exploration_nodes (exploration_id,kind,state,title,created_at,updated_at) VALUES ($1,'goal','open','g',now(),now())`, expID)
+
+	r, b := apiCall(t, "POST", base+"/api/tasks/"+itoa(taskID)+"/chat", tok,
+		map[string]string{"message": "立刻测 10.0.0.5 的 22 端口"})
+	if r.StatusCode != 200 {
+		t.Fatalf("chat: %d %s", r.StatusCode, b)
+	}
+	// 回复文本可读。
+	if !strings.Contains(string(b), "reply") {
+		t.Fatalf("响应缺 reply: %s", b)
+	}
 }

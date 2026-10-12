@@ -131,3 +131,20 @@ func workspaceRoot(ec ExecContext) string {
 	}
 	return "/workspace"
 }
+
+// AssembleMainAgent 装配人在环路主控（MainAgentPromptConst + 操舵工具集）。
+func AssembleMainAgent(deps CommonDeps, ec ExecContext) harness.Options {
+	reg := tools.NewRegistry()
+	for _, t := range DomainTools(deps.Graph, ec) {
+		reg.Register(t) // 观察 + add_intent/add_hint 操舵
+	}
+	for _, t := range SteerTools(deps, ec) {
+		reg.Register(t)
+	}
+	return harness.Options{
+		Tools:     reg,
+		System:    MainAgentPromptConst,
+		MaxTurns:  8,
+		MaxTokens: orDefault(deps.MaxTokens, 8192),
+	}
+}
