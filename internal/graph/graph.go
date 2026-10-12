@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -412,4 +413,57 @@ func (g *GraphStore) BindTraffic(ctx context.Context, taskID, findingID int64, e
 	b, _ := json.Marshal(evs)
 	_, err := g.s.Exec(ctx, `UPDATE findings SET evidence=$2::jsonb WHERE id=$1`, findingID, string(b))
 	return err
+}
+
+// Coverage 是覆盖度报告（ARTEX list_untested_assets 对标）。
+type Coverage struct {
+	Scope    int      `json:"scope"`    // 分母：任务资产总数
+	Tested   int      `json:"tested"`   // 分子：已被 intent 锚定覆盖的资产
+	Untested []string `json:"untested"` // 未测资产 key 清单
+}
+
+// Coverage 计算任务覆盖度：scope 分母 vs intent 锚定分子。
+func (g *GraphStore) Coverage(ctx context.Context, taskID int64) (Coverage, error) {
+	var cov Coverage
+
+	// 分母：任务全部资产。
+	rows, err := g.s.Query(ctx, `SELECT key FROM assets WHERE $1 = ANY(task_ids) ORDER BY key`, taskID)
+	if err != nil {
+		return cov, err
+	}
+	all := map[string]bool{}
+	for rows.Next() {
+		var k string
+		if err := rows.Scan(&k); err == nil {
+			all[k] = true
+		}
+	}
+	rows.Close()
+	cov.Scope = len(all)
+
+	// 分子：已被 intent（任意状态）锚定的资产。
+	tested := map[string]bool{}
+	trows, err := g.s.Query(ctx, `SELECT a.key FROM exploration_anchors ea
+		JOIN exploration_nodes n ON n.id = ea.node_id
+		JOIN assets a ON a.id = ea.asset_id
+		WHERE n.kind = 'intent'`)
+	if err == nil {
+		for trows.Next() {
+			var k string
+			if err := trows.Scan(&k); err == nil {
+				tested[k] = true
+			}
+		}
+		trows.Close()
+	}
+	cov.Tested = len(tested)
+
+	// 未测清单。
+	for k := range all {
+		if !tested[k] {
+			cov.Untested = append(cov.Untested, k)
+		}
+	}
+	sort.Strings(cov.Untested)
+	return cov, nil
 }

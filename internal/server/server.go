@@ -204,8 +204,9 @@ func (s *Server) Router() http.Handler {
 	inner.Handle("POST /api/llm/profiles",
 		s.requireRole("admin")(http.HandlerFunc(s.handleCreateProfile)))
 
-	// 报告导出。
+	// 报告导出与覆盖度。
 	inner.HandleFunc("GET /api/tasks/{id}/report", s.handleTaskReport)
+	inner.HandleFunc("GET /api/tasks/{id}/coverage", s.handleTaskCoverage)
 
 	// 复测（operator+）。
 	inner.Handle("POST /api/findings/{id}/retest",

@@ -349,3 +349,18 @@ func (s *Server) handleTestNotify(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, 200, map[string]bool{"ok": true})
 }
+
+// handleTaskCoverage 覆盖度报告（未测资产清单——测试完整性证明）。
+func (s *Server) handleTaskCoverage(w http.ResponseWriter, r *http.Request) {
+	var taskID int64
+	if _, err := fmt.Sscanf(r.PathValue("id"), "%d", &taskID); err != nil {
+		errJSON(w, http.StatusBadRequest, "bad id")
+		return
+	}
+	cov, err := s.graph.Coverage(r.Context(), taskID)
+	if err != nil {
+		errJSON(w, 500, err.Error())
+		return
+	}
+	writeJSON(w, 200, cov)
+}
