@@ -54,11 +54,12 @@ func (p *openaiProvider) buildBody(req Request) ([]byte, error) {
 	if model == "" || model == "auto" {
 		model = p.cfg.Model
 	}
+	// 注意：不发 stream_options——部分网关（实测 mimo）对该字段挂起无响应；
+	// usage 从普通分片的 usage 字段收集（多数网关末片自带）。
 	payload := map[string]any{
-		"model":           model,
-		"max_tokens":      max(req.MaxTokens, 1),
-		"stream":          true,
-		"stream_options":  map[string]any{"include_usage": true},
+		"model":      model,
+		"max_tokens": max(req.MaxTokens, 1),
+		"stream":     true,
 	}
 	if req.System != "" {
 		// system 作为首条消息（兼容网关最广）。

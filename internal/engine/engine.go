@@ -5,6 +5,7 @@ package engine
 
 import (
 	"context"
+	"log"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -33,6 +34,7 @@ type Deps struct {
 	Debounce   time.Duration // planner 唤醒合并窗口（默认 800ms；测试调小）
 	MaxTokens  int           // profile.max_tokens 透传（C3）
 	CtxWindowK int           // 上下文窗口（千 token，压缩阈值用）
+	RunSeconds int           // 单意图预算（0=默认 1200）
 	Workroot   string        // worker/expert 文件根（沙箱 /workspace 或本地 dataDir）
 	ActivityFn func(intentID int64, role, kind, payload string) // 事件落库回调，可 nil
 }
@@ -267,6 +269,7 @@ func (e *Engine) runIntent(ctx context.Context, intent graph.Node) {
 		MaxTurns:   e.MaxTurns,
 		MaxTokens:  e.Deps.MaxTokens,
 		CtxWindowK: e.Deps.CtxWindowK,
+		RunSeconds: e.Deps.RunSeconds,
 		Workroot:   e.Deps.Workroot,
 	}
 	opts := agents.AssembleWorker(deps, ec, intent)
@@ -408,7 +411,9 @@ func (e *Engine) planOnce(ctx context.Context, finish func(string), trigger stri
 	opts.Model = e.Deps.Model
 
 	sess := harness.NewSession(opts, fmt.Sprintf("t%d-planner", e.taskID))
-	_, _ = sess.Query(ctx, opts.System, user)
+	if _, err := sess.Query(ctx, opts.System, user); err != nil {
+		log.Printf("[planner] query err: %v", err)
+	}
 }
 
 // checkTaskComplete：全部 goal 终态且无 open/running 意图 → done。

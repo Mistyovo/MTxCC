@@ -116,3 +116,9 @@ func TestAnthropicStripsThinkingAndEmptyMessages(t *testing.T) {
 		t.Fatalf("消息数 = %d, want 3（纯思考轮应跳过）", len(wire.Messages))
 	}
 }
+
+// startRecorder 启动 SSE 录制服务器（共享给 openai 兼容测试）。
+func startRecorder(rec *wireRecorder, t *testing.T) *httptest.Server {
+	t.Helper()
+	return httptest.NewServer(rec.handler(t))
+}

@@ -132,9 +132,13 @@ func (r *Runner) RunSuite() (*ScoreReport, error) {
 }
 
 func (r *Runner) createTask(targetURL string) (int64, error) {
+	to := r.TimeoutSec
+	if to <= 0 {
+		to = 86400 // 无限时间限制（用户要求）：24h 语义上限
+	}
 	body, _ := json.Marshal(map[string]any{
 		"target_text":     targetURL,
-		"timeout_seconds": r.TimeoutSec,
+		"timeout_seconds": to,
 		"roe": map[string]any{
 			"mode":     "enforce",
 			"in_scope": []string{"127.0.0.0/8", "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"},
@@ -155,7 +159,7 @@ func (r *Runner) createTask(targetURL string) (int64, error) {
 }
 
 func (r *Runner) waitTask(taskID int64) (string, error) {
-	deadline := time.Now().Add(time.Duration(r.TimeoutSec+120) * time.Second)
+	deadline := time.Now().Add(time.Duration(r.TimeoutSec+600) * time.Second)
 	for time.Now().Before(deadline) {
 		resp, err := r.api("GET", "/api/tasks", nil)
 		if err != nil {
