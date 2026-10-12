@@ -22,15 +22,16 @@ import (
 // runBench mtx bench --adapter dvwa --api http://127.0.0.1:8080 --token <jwt> [--model 名称]
 func runBench(args []string) error {
 	fs := flag.NewFlagSet("bench", flag.ExitOnError)
-	adapter := fs.String("adapter", "dvwa", "基准平台：dvwa|xbow|tsec")
+	adapter := fs.String("adapter", "dvwa", "基准平台：dvwa|xbow（本地仓库，MTX_XBOW_DIR）|tsec")
 	api := fs.String("api", "http://127.0.0.1:8080", "MTxCC API 地址")
 	token := fs.String("token", os.Getenv("MTX_TOKEN"), "MTxCC JWT")
 	model := fs.String("model", "auto", "模型名（报告标注用）")
+	timeout := fs.Int("timeout", 0, "单题超时（秒），0=无限（默认）")
 	_ = fs.Parse(args)
 
 	reg := benchmark.NewRegistry()
 	reg.Register("dvwa", &benchmark.DVWAAdapter{})
-	reg.Register("xbow", &benchmark.XBowAdapter{Token: os.Getenv("MTX_XBOW_TOKEN")})
+	reg.Register("xbow", benchmark.NewXBowLocal(os.Getenv("MTX_XBOW_DIR"))) // 本地仓库模式（无需 token）
 	reg.Register("tsec", &benchmark.TsecAdapter{Token: os.Getenv("MTX_TSEC_TOKEN")})
 	a, ok := reg.Get(*adapter)
 	if !ok {
@@ -40,7 +41,11 @@ func runBench(args []string) error {
 		return fmt.Errorf("缺少 --token（或 MTX_TOKEN 环境变量）")
 	}
 
-	r := &benchmark.Runner{Adapter: a, APIBase: *api, Token: *token, Model: *model}
+	to := *timeout
+	if to == 0 {
+		to = 86400
+	}
+	r := &benchmark.Runner{Adapter: a, APIBase: *api, Token: *token, Model: *model, TimeoutSec: to}
 	fmt.Printf("▶ 基准跑分：adapter=%s api=%s model=%s\n", *adapter, *api, *model)
 	rep, err := r.RunSuite()
 	if err != nil {
