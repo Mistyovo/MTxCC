@@ -441,12 +441,13 @@ func (g *GraphStore) Coverage(ctx context.Context, taskID int64) (Coverage, erro
 	rows.Close()
 	cov.Scope = len(all)
 
-	// 分子：已被 intent（任意状态）锚定的资产。
+	// 分子：本任务的 intent（任意状态）锚定的资产。
 	tested := map[string]bool{}
 	trows, err := g.s.Query(ctx, `SELECT a.key FROM exploration_anchors ea
 		JOIN exploration_nodes n ON n.id = ea.node_id
+		JOIN exploration e ON e.id = n.exploration_id
 		JOIN assets a ON a.id = ea.asset_id
-		WHERE n.kind = 'intent'`)
+		WHERE n.kind = 'intent' AND e.task_id = $1`, taskID)
 	if err == nil {
 		for trows.Next() {
 			var k string

@@ -212,6 +212,12 @@ func (s *Server) Router() http.Handler {
 	inner.Handle("POST /api/findings/{id}/retest",
 		s.requireRole("admin", "operator")(http.HandlerFunc(s.handleFindingRetest)))
 
+	// 通知通道（admin 管理）。
+	inner.Handle("POST /api/notify/channels",
+		s.requireRole("admin")(http.HandlerFunc(s.handleAddChannel)))
+	inner.Handle("POST /api/notify/test",
+		s.requireRole("admin")(http.HandlerFunc(s.handleTestNotify)))
+
 	// 任务模板（operator+ 建）。
 	inner.Handle("POST /api/templates",
 		s.requireRole("admin", "operator")(http.HandlerFunc(s.handleCreateTemplate)))
