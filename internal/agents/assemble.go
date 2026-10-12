@@ -101,7 +101,7 @@ func AssemblePlanner(deps CommonDeps, ec ExecContext) harness.Options {
 		Perms:     nil, // planner 不执行目标流量（无 bash）
 		System:    PlannerPromptConst,
 		MaxTurns:  maxTurns,
-		MaxTokens: deps.MaxTokens,
+		MaxTokens: orDefault(deps.MaxTokens, 8192),
 	}
 }
 
@@ -112,9 +112,10 @@ func AssembleGoals(deps CommonDeps, ec ExecContext) harness.Options {
 		reg.Register(t)
 	}
 	return harness.Options{
-		Tools:    reg,
-		System:   GoalsPromptConst,
-		MaxTurns: 8,
+		Tools:     reg,
+		System:    GoalsPromptConst,
+		MaxTurns:  8,
+		MaxTokens: orDefault(deps.MaxTokens, 8192),
 	}
 }
 

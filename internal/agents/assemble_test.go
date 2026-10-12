@@ -92,3 +92,7 @@ func TestRenderPromptFallback(t *testing.T) {
 		t.Fatalf("好模板渲染异常: %q fallback=%v", got, usedFallback)
 	}
 }
+
+
+// nodeTitle 构造意图节点（测试用）。
+func nodeTitle(title string) graph.Node { return graph.Node{Title: title} }

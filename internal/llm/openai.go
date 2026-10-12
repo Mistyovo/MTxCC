@@ -2,13 +2,14 @@ package llm
 
 import (
 	"bufio"
+	"os"
+	"strings"
 	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
-	"strings"
 )
 
 // openaiProvider 实现 OpenAI Chat Completions 流式（兼容网关/vLLM/Ollama 等同形态端点）。
@@ -39,6 +40,15 @@ func (p *openaiProvider) Stream(ctx context.Context, req Request) (<-chan Event,
 		b, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
 		return nil, fmt.Errorf("openai HTTP %d: %s", resp.StatusCode, string(b))
 	}
+	// debug: dump 请求 body 按角色（定位 worker/planner 差异）。
+	tag := "unknown"
+	if strings.Contains(req.System, "规划者") {
+		tag = "planner"
+	} else if strings.Contains(req.System, "执行者") {
+		tag = "worker"
+	}
+	_ = os.WriteFile("/tmp/reqdump-"+tag+".json", body, 0o644)
+
 	ch := make(chan Event, 64)
 	go pumpSSE(resp, ch, translateOpenAI)
 	return ch, nil

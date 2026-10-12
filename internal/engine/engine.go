@@ -402,7 +402,7 @@ func (e *Engine) planOnce(ctx context.Context, finish func(string), trigger stri
 	ec := agents.ExecContext{TaskID: e.taskID, ExpID: e.expID, Role: "planner"}
 	deps := agents.CommonDeps{
 		Graph: e.Deps.Graph, Transcript: e.Deps.Transcript, Model: e.Deps.Model,
-		MaxTurns: 12,
+		MaxTurns: 12, MaxTokens: e.Deps.MaxTokens,
 	}
 	deps.MaxTurns = 12
 	opts := agents.AssemblePlanner(deps, ec)
