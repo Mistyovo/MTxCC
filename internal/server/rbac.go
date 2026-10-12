@@ -467,3 +467,67 @@ func mustJSON(v any) []byte {
 	b, _ := json.Marshal(v)
 	return b
 }
+
+// handleTaskArchive 任务归档导出（合规留存：任务+发现+覆盖度+审计 JSON 包）。
+func (s *Server) handleTaskArchive(w http.ResponseWriter, r *http.Request) {
+	var taskID int64
+	if _, err := fmt.Sscanf(r.PathValue("id"), "%d", &taskID); err != nil {
+		errJSON(w, http.StatusBadRequest, "bad id")
+		return
+	}
+	var task struct {
+		TargetText string
+		Status     string
+		CreatedAt  string
+	}
+	if err := s.store.QueryRow(sqlCtx(),
+		`SELECT target_text, status, created_at::text FROM tasks WHERE id=$1`, taskID).
+		Scan(&task.TargetText, &task.Status, &task.CreatedAt); err != nil {
+		errJSON(w, 404, "任务不存在: "+err.Error())
+		return
+	}
+
+	// 发现。
+	rows, err := s.store.Query(sqlCtx(),
+		`SELECT id, severity, status, verify_state, title, summary, evidence::text
+		 FROM findings WHERE task_id=$1 ORDER BY id`, taskID)
+	if err != nil {
+		errJSON(w, 500, err.Error())
+		return
+	}
+	findings := []map[string]any{}
+	for rows.Next() {
+		var id int64
+		var sev, st, vs, title, summary, ev string
+		_ = rows.Scan(&id, &sev, &st, &vs, &title, &summary, &ev)
+		findings = append(findings, map[string]any{
+			"id": id, "severity": sev, "status": st, "verify_state": vs,
+			"title": title, "summary": summary, "evidence": json.RawMessage(ev),
+		})
+	}
+	rows.Close()
+
+	cov, _ := s.graph.Coverage(r.Context(), taskID)
+	audits := []map[string]any{}
+	arows, _ := s.store.Query(sqlCtx(),
+		`SELECT action, target_type, target_id, created_at FROM audit_log
+		 WHERE target_id = $1 OR detail::text LIKE '%' || $1 || '%'
+		 ORDER BY id DESC LIMIT 100`, fmt.Sprint(taskID))
+	if arows != nil {
+		for arows.Next() {
+			var action, tt, tid, created string
+			_ = arows.Scan(&action, &tt, &tid, &created)
+			audits = append(audits, map[string]any{"action": action, "target_type": tt, "target_id": tid, "created_at": created})
+		}
+		arows.Close()
+	}
+
+	archive := map[string]any{
+		"task":     map[string]any{"id": taskID, "target_text": task.TargetText, "status": task.Status, "created_at": task.CreatedAt},
+		"findings": findings,
+		"coverage": cov,
+		"audit":    audits,
+	}
+	s.audit(r, "task.archive", "task", fmt.Sprint(taskID), map[string]string{"findings": fmt.Sprint(len(findings))})
+	writeJSON(w, 200, archive)
+}

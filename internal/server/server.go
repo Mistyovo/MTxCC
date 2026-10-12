@@ -218,6 +218,10 @@ func (s *Server) Router() http.Handler {
 	inner.Handle("POST /api/notify/test",
 		s.requireRole("admin")(http.HandlerFunc(s.handleTestNotify)))
 
+	// 归档导出（operator+）。
+	inner.Handle("GET /api/tasks/{id}/archive",
+		s.requireRole("admin", "operator", "auditor")(http.HandlerFunc(s.handleTaskArchive)))
+
 	// 任务模板（operator+ 建）。
 	inner.Handle("POST /api/templates",
 		s.requireRole("admin", "operator")(http.HandlerFunc(s.handleCreateTemplate)))
